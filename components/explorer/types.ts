@@ -102,6 +102,10 @@ export type FileSystemProps = {
   filters?: FileSystemFilter[]
   onFiltersChangeAction?: (filters: FileSystemFilter[]) => void
   showFileExtensions?: boolean
+  /** Show dot-prefixed (hidden) files and folders. Defaults to false. */
+  defaultShowHiddenFiles?: boolean
+  showHiddenFiles?: boolean
+  onShowHiddenFilesChangeAction?: (showHiddenFiles: boolean) => void
   defaultPath?: string
   onPathChangeAction?: (path: string) => void
   onSelectionChange?: (item: FileSystemItem | null) => void

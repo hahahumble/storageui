@@ -63,6 +63,18 @@ export function pathParent(path: string) {
   return separatorIndex === -1 ? "" : trimmed.slice(0, separatorIndex + 1)
 }
 
+// A path is "hidden" when any of its segments starts with a dot — dotfiles
+// (`.env`) and dotfolders (`.config/`) alike. `.` / `..` never appear in
+// storage keys but are excluded defensively.
+export function isHiddenPath(path: string) {
+  return path
+    .split("/")
+    .some(
+      (segment) =>
+        segment.startsWith(".") && segment !== "." && segment !== ".."
+    )
+}
+
 export function fileExtension(name: string) {
   const dotIndex = name.lastIndexOf(".")
   return dotIndex === -1 ? "" : name.slice(dotIndex + 1).toLowerCase()

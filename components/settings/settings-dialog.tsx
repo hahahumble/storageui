@@ -75,6 +75,10 @@ export function SettingsDialog({
   const setShowImagePreviews = usePreferencesStore(
     (state) => state.setShowImagePreviews
   )
+  const showHiddenFiles = usePreferencesStore((state) => state.showHiddenFiles)
+  const setShowHiddenFiles = usePreferencesStore(
+    (state) => state.setShowHiddenFiles
+  )
   const timeFormat = usePreferencesStore((state) => state.timeFormat)
   const setTimeFormat = usePreferencesStore((state) => state.setTimeFormat)
   const directClientRequests = usePreferencesStore(
@@ -244,6 +248,21 @@ export function SettingsDialog({
                     <Switch
                       checked={showFileExtensions}
                       onCheckedChange={setShowFileExtensions}
+                    />
+                  </label>
+
+                  <label className="flex cursor-pointer items-center justify-between gap-6 py-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">
+                        {t("showHiddenFiles")}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {t("showHiddenFilesHint")}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={showHiddenFiles}
+                      onCheckedChange={setShowHiddenFiles}
                     />
                   </label>
 

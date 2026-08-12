@@ -19,6 +19,8 @@ type PersistedPreferencesState = {
    * browser via `files-sdk`, bypassing the server. Off by default.
    */
   directClientRequests: boolean
+  /** Dot-prefixed (hidden) files and folders are shown in the browser. */
+  showHiddenFiles: boolean
 }
 
 type PreferencesStore = PersistedPreferencesState & {
@@ -26,6 +28,7 @@ type PreferencesStore = PersistedPreferencesState & {
   setShowFileExtensions: (value: boolean) => void
   setTimeFormat: (value: TimeFormat) => void
   setDirectClientRequests: (value: boolean) => void
+  setShowHiddenFiles: (value: boolean) => void
 }
 
 export const usePreferencesStore = create<PreferencesStore>()(
@@ -35,10 +38,12 @@ export const usePreferencesStore = create<PreferencesStore>()(
       showFileExtensions: true,
       timeFormat: "12h",
       directClientRequests: false,
+      showHiddenFiles: false,
       setShowImagePreviews: (value) => set({ showImagePreviews: value }),
       setShowFileExtensions: (value) => set({ showFileExtensions: value }),
       setTimeFormat: (value) => set({ timeFormat: value }),
       setDirectClientRequests: (value) => set({ directClientRequests: value }),
+      setShowHiddenFiles: (value) => set({ showHiddenFiles: value }),
     }),
     {
       name: STORE_NAME,
@@ -50,6 +55,7 @@ export const usePreferencesStore = create<PreferencesStore>()(
         showFileExtensions: state.showFileExtensions,
         timeFormat: state.timeFormat,
         directClientRequests: state.directClientRequests,
+        showHiddenFiles: state.showHiddenFiles,
       }),
     }
   )

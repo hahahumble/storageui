@@ -80,6 +80,7 @@ import {
   formatEntryName,
   IPAD_MIN_WIDTH,
   isCustomDateRangeValue,
+  isHiddenPath,
   MIME_TYPE_LABELS,
   mimeTypeForFile,
   normalizeFolderPath,
@@ -128,6 +129,8 @@ import {
   Download01Icon,
   Edit02Icon,
   ExternalLinkIcon,
+  EyeIcon,
+  EyeOffIcon,
   FavouriteIcon,
   File01Icon,
   FilterIcon,
@@ -319,6 +322,9 @@ export function FileSystem({
   filters: filtersProp,
   onFiltersChangeAction,
   showFileExtensions = true,
+  defaultShowHiddenFiles = false,
+  showHiddenFiles: showHiddenFilesProp,
+  onShowHiddenFilesChangeAction,
   defaultPath = "",
   onPathChangeAction,
   onSelectionChange,
@@ -354,20 +360,37 @@ export function FileSystem({
     () => (loadedItems.length ? [...items, ...loadedItems] : items),
     [items, loadedItems]
   )
+  const [internalShowHiddenFiles, setInternalShowHiddenFiles] = React.useState(
+    defaultShowHiddenFiles
+  )
+  const showHiddenFiles = showHiddenFilesProp ?? internalShowHiddenFiles
+  const setShowHiddenFiles = React.useCallback(
+    (next: boolean) => {
+      if (showHiddenFilesProp === undefined) setInternalShowHiddenFiles(next)
+      onShowHiddenFilesChangeAction?.(next)
+    },
+    [onShowHiddenFilesChangeAction, showHiddenFilesProp]
+  )
   // Paths optimistically hidden while a move is in flight, so a drag-drop (or a
   // dialog move) removes the entries from the source folder instantly instead
   // of waiting seconds for the server move + re-list.
   const [optimisticallyMovedPaths, setOptimisticallyMovedPaths] =
     React.useState<ReadonlySet<string>>(EMPTY_SELECTION)
   const visibleItems = React.useMemo(() => {
-    if (optimisticallyMovedPaths.size === 0) return allItems
-    return allItems.filter(
-      (item) =>
-        ![...optimisticallyMovedPaths].some(
-          (path) => item.path === path || item.path.startsWith(path)
-        )
-    )
-  }, [allItems, optimisticallyMovedPaths])
+    let next = allItems
+    if (optimisticallyMovedPaths.size > 0) {
+      next = next.filter(
+        (item) =>
+          ![...optimisticallyMovedPaths].some(
+            (path) => item.path === path || item.path.startsWith(path)
+          )
+      )
+    }
+    if (!showHiddenFiles) {
+      next = next.filter((item) => !isHiddenPath(item.path))
+    }
+    return next
+  }, [allItems, optimisticallyMovedPaths, showHiddenFiles])
   const index = React.useMemo(
     () => buildFileSystemIndex(visibleItems),
     [visibleItems]
@@ -538,6 +561,35 @@ export function FileSystem({
   const sortedChildrenRef = React.useRef<Map<string, FileSystemEntry[]>>(
     new Map()
   )
+
+  // Drop selections whose entries were hidden (or removed) so the footer
+  // count and context actions can't reference stale paths.
+  React.useEffect(() => {
+    setSelectedPath((previous) => {
+      if (
+        previous !== null &&
+        !index.files.has(previous) &&
+        !index.folders.has(normalizeFolderPath(previous))
+      ) {
+        selectedPathRef.current = null
+        return null
+      }
+      return previous
+    })
+    setSelectedPaths((previous) => {
+      if (previous.size === 0) return previous
+      const next = new Set(
+        [...previous].filter(
+          (path) =>
+            index.files.has(path) ||
+            index.folders.has(normalizeFolderPath(path))
+        )
+      )
+      if (next.size === previous.size) return previous
+      selectedPathsRef.current = next
+      return next
+    })
+  }, [index])
 
   const applySelection = React.useCallback(
     (
@@ -1916,6 +1968,26 @@ export function FileSystem({
                 onSelectDatePreset={setDatePresetFilter}
                 onToggleFileType={toggleFileTypeFilterValue}
               />
+              <button
+                type="button"
+                aria-label={
+                  showHiddenFiles ? t("hideHiddenFiles") : t("showHiddenFiles")
+                }
+                title={
+                  showHiddenFiles ? t("hideHiddenFiles") : t("showHiddenFiles")
+                }
+                aria-pressed={showHiddenFiles}
+                onClick={() => setShowHiddenFiles(!showHiddenFiles)}
+                className={cn(
+                  TOOLBAR_ICON_BUTTON_CLASSNAME,
+                  showHiddenFiles && "bg-accent text-foreground"
+                )}
+              >
+                <AppIcon
+                  icon={showHiddenFiles ? EyeOffIcon : EyeIcon}
+                  className="size-4"
+                />
+              </button>
               <FileSystemSearchField
                 inputRef={searchInputRef}
                 isExpanded={isSearchExpanded}

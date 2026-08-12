@@ -38,6 +38,8 @@ export {
   IconDownload as Download01Icon,
   IconPencil as Edit02Icon,
   IconExternalLink as ExternalLinkIcon,
+  IconEye as EyeIcon,
+  IconEyeOff as EyeOffIcon,
   IconStar as FavouriteIcon,
   IconFile as File01Icon,
   IconFilter as FilterIcon,
