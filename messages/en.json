@@ -33,6 +33,7 @@
     "usernamePlaceholder": "Enter your username",
     "passwordPlaceholder": "Enter your password",
     "invalidCredentials": "Incorrect username or password.",
+    "challengeFailed": "Verification failed. Please try again.",
     "language": "Language"
   },
   "Settings": {

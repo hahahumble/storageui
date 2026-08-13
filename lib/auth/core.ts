@@ -10,10 +10,13 @@ export function isAuthEnabled(): boolean {
 }
 
 function sessionSecret(): string {
-  return (
-    process.env.AUTH_SECRET ||
-    `${process.env.AUTH_USERNAME ?? ""}:${process.env.AUTH_PASSWORD ?? ""}`
-  )
+  return [
+    process.env.AUTH_SECRET ?? "",
+    process.env.AUTH_USERNAME ?? "",
+    process.env.AUTH_PASSWORD ?? "",
+  ]
+    .map((part) => `${part.length}:${part}`)
+    .join("")
 }
 
 export function verifyCredentials(username: string, password: string): boolean {

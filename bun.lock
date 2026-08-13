@@ -34,6 +34,7 @@
         "@extend-ai/react-docx": "0.8.1",
         "@extend-ai/react-xlsx": "0.15.0",
         "@glideapps/glide-data-grid": "6.0.4-alpha24",
+        "@marsidev/react-turnstile": "^1.6.0",
         "@paper-design/shaders-react": "^0.0.77",
         "@pierre/diffs": "^1.2.12",
         "@pierre/trees": "1.0.0-beta.5",
@@ -558,6 +559,8 @@
     "@linaria/react": ["@linaria/react@6.3.0", "", { "dependencies": { "@emotion/is-prop-valid": "^1.2.0", "@linaria/core": "^6.3.0", "@wyw-in-js/processor-utils": "^0.6.0", "@wyw-in-js/shared": "^0.6.0", "minimatch": "^9.0.3", "react-html-attributes": "^1.4.6", "resolve": "^1.22.8", "ts-invariant": "^0.10.3" }, "peerDependencies": { "react": ">=16" } }, "sha512-CjdEPwQCIRB3BRecnwK0g9mEWow3M1zAJTKI7h/B6j3yRLQRelitcoLd19MxZNz89pc0NNPALqy2I+eBGH0lJA=="],
 
     "@marijn/find-cluster-break": ["@marijn/find-cluster-break@1.0.2", "", {}, "sha512-l0h88YhZFyKdXIFNfSWpyjStDjGHwZ/U7iobcK1cQQD8sejsONdQtTVU+1wVN1PBw40PiiHB1vA5S7VTfQiP9g=="],
+
+    "@marsidev/react-turnstile": ["@marsidev/react-turnstile@1.6.0", "", { "peerDependencies": { "react": "^17.0.2 || ^18.0.0 || ^19.0", "react-dom": "^17.0.2 || ^18.0.0 || ^19.0" } }, "sha512-T2Um71ZdBgQBiyS01xgRMvDWk+mEsrLtXLFVhOC917OVEO584wbPOWj1sw35RaM17+q9QoADgLVcH60xr9NRqQ=="],
 
     "@mdx-js/mdx": ["@mdx-js/mdx@3.1.1", "", { "dependencies": { "@types/estree": "^1.0.0", "@types/estree-jsx": "^1.0.0", "@types/hast": "^3.0.0", "@types/mdx": "^2.0.0", "acorn": "^8.0.0", "collapse-white-space": "^2.0.0", "devlop": "^1.0.0", "estree-util-is-identifier-name": "^3.0.0", "estree-util-scope": "^1.0.0", "estree-walker": "^3.0.0", "hast-util-to-jsx-runtime": "^2.0.0", "markdown-extensions": "^2.0.0", "recma-build-jsx": "^1.0.0", "recma-jsx": "^1.0.0", "recma-stringify": "^1.0.0", "rehype-recma": "^1.0.0", "remark-mdx": "^3.0.0", "remark-parse": "^11.0.0", "remark-rehype": "^11.0.0", "source-map": "^0.7.0", "unified": "^11.0.0", "unist-util-position-from-estree": "^2.0.0", "unist-util-stringify-position": "^4.0.0", "unist-util-visit": "^5.0.0", "vfile": "^6.0.0" } }, "sha512-f6ZO2ifpwAQIpzGWaBQT2TXxPv6z3RBzQKpVftEWN78Vl/YweF1uwussDx8ECAXVtr3Rs89fKyG9YlzUs9DyGQ=="],
 

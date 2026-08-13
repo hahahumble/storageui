@@ -33,6 +33,7 @@
     "usernamePlaceholder": "请输入用户名",
     "passwordPlaceholder": "请输入密码",
     "invalidCredentials": "用户名或密码错误。",
+    "challengeFailed": "验证未通过，请重试。",
     "language": "语言"
   },
   "Settings": {

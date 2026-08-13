@@ -53,6 +53,7 @@
     "@extend-ai/react-docx": "0.8.1",
     "@extend-ai/react-xlsx": "0.15.0",
     "@glideapps/glide-data-grid": "6.0.4-alpha24",
+    "@marsidev/react-turnstile": "^1.6.0",
     "@paper-design/shaders-react": "^0.0.77",
     "@pierre/diffs": "^1.2.12",
     "@pierre/trees": "1.0.0-beta.5",

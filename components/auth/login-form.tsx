@@ -2,7 +2,9 @@
 
 import * as React from "react"
 import { useActionState } from "react"
+import { Turnstile, type TurnstileInstance } from "@marsidev/react-turnstile"
 import { useTranslations } from "next-intl"
+import { useTheme } from "next-themes"
 
 import { siteConfig } from "@/lib/config/site"
 import { Button } from "@/components/ui/button"
@@ -12,12 +14,22 @@ import { loginAction, type LoginState } from "@/app/actions/auth"
 
 const INITIAL_STATE: LoginState = { error: null }
 
-export function LoginForm() {
+export function LoginForm({
+  turnstileSiteKey,
+}: {
+  turnstileSiteKey: string | null
+}) {
   const t = useTranslations("Login")
+  const { resolvedTheme } = useTheme()
   const [state, formAction, isPending] = useActionState(
     loginAction,
     INITIAL_STATE
   )
+
+  const turnstileRef = React.useRef<TurnstileInstance | null>(null)
+  React.useEffect(() => {
+    if (state.error) turnstileRef.current?.reset()
+  }, [state])
 
   return (
     <div className="w-full max-w-md space-y-6">
@@ -67,6 +79,17 @@ export function LoginForm() {
             </p>
           ) : null}
         </div>
+
+        {turnstileSiteKey ? (
+          <Turnstile
+            ref={turnstileRef}
+            siteKey={turnstileSiteKey}
+            options={{
+              theme: resolvedTheme === "dark" ? "dark" : "light",
+              size: "flexible",
+            }}
+          />
+        ) : null}
 
         <Button type="submit" loading={isPending}>
           {t("signIn")}

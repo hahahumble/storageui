@@ -8,6 +8,7 @@ import {
   SESSION_COOKIE_NAME,
   verifySessionToken,
 } from "@/lib/auth/core"
+import { turnstileSiteKey } from "@/lib/auth/turnstile"
 import { siteConfig } from "@/lib/config/site"
 import { LoginForm } from "@/components/auth/login-form"
 import { LoginLocaleSwitcher } from "@/components/auth/login-locale-switcher"
@@ -28,7 +29,7 @@ export default async function LoginPage() {
 
   return (
     <main className="relative flex min-h-svh items-center justify-center bg-background p-6 pb-16">
-      <LoginForm />
+      <LoginForm turnstileSiteKey={turnstileSiteKey()} />
       <div className="absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-2 text-sm text-muted-foreground">
         <LoginLocaleSwitcher />
         <span aria-hidden="true">·</span>

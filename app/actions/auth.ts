@@ -11,6 +11,7 @@ import {
   SESSION_MAX_AGE_SECONDS,
   verifyCredentials,
 } from "@/lib/auth/core"
+import { verifyTurnstile } from "@/lib/auth/turnstile"
 
 export type LoginState = { error: string | null }
 
@@ -26,6 +27,12 @@ export async function loginAction(
   const username = String(formData.get("username") ?? "")
   const password = String(formData.get("password") ?? "")
 
+  const token = String(formData.get("cf-turnstile-response") ?? "")
+  if (!(await verifyTurnstile(token))) {
+    const t = await getTranslations("Login")
+    return { error: t("challengeFailed") }
+  }
+
   if (!verifyCredentials(username, password)) {
     const t = await getTranslations("Login")
     return { error: t("invalidCredentials") }
@@ -40,7 +47,6 @@ export async function loginAction(
     maxAge: SESSION_MAX_AGE_SECONDS,
   })
 
-  // Set-Cookie rides along with the redirect response.
   redirect("/")
 }
 
