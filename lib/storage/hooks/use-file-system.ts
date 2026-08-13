@@ -3,6 +3,9 @@
 import * as React from "react"
 
 import {
+  encodeRefHeader,
+  PROXY_COOKIE_PREFIX,
+  REF_HEADER,
   toConnectionRef,
   type ConnectionRef,
 } from "@/lib/storage/connection-ref"
@@ -30,23 +33,38 @@ import {
 
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? ""
 
+const PROXY_PATH = `${BASE_PATH}/api/file`
+
 /**
  * Server-proxied file URL for adapters with no presigned URL primitive
- * (WebDAV). The ref rides the query string — it carries credentials only for
- * local connections, and the route is auth-gated by the global proxy.
+ * (WebDAV).
+ *
+ * Only the connection id rides the query string. This URL becomes an `<img>`
+ * src, a media src and a download link, so it lands in browser history, the
+ * download list, `Referer` headers on any outbound navigation and the server's
+ * access log — none of which may hold a local connection's password. Those
+ * credentials go in a path-scoped session cookie instead: the browser already
+ * keeps them in localStorage, so the cookie exposes nothing new, and cookies
+ * reach none of the places above.
  */
 function webdavProxyUrl(
-  ref: ConnectionRef | null,
+  connection: Connection | null,
   key: string,
   download = false
 ): string {
-  if (!ref) return ""
-  const params = new URLSearchParams({
-    ref: JSON.stringify(ref),
-    key,
-  })
+  if (!connection) return ""
+
+  if (connection.source === "local") {
+    const secure = window.location.protocol === "https:" ? "; Secure" : ""
+    document.cookie =
+      `${PROXY_COOKIE_PREFIX}${encodeURIComponent(connection.id)}=` +
+      `${encodeURIComponent(JSON.stringify(connection))}` +
+      `; Path=${PROXY_PATH}; SameSite=Strict${secure}`
+  }
+
+  const params = new URLSearchParams({ c: connection.id, key })
   if (download) params.set("download", "1")
-  return `${BASE_PATH}/api/file?${params.toString()}`
+  return `${PROXY_PATH}?${params.toString()}`
 }
 
 function errorMessage(error: unknown): string {
@@ -108,12 +126,25 @@ function saveDownload(url: string, name: string, revoke = false) {
   if (revoke) setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-/** Direct browser upload to a presigned URL, with byte progress. */
-function uploadToSignedUrl(
-  signed: SignedUpload,
-  file: File,
+/**
+ * Send a body with byte progress. `fetch` has no upload-progress event at all,
+ * which is why every upload path here goes through XHR.
+ */
+function sendWithProgress({
+  method,
+  url,
+  body,
+  headers,
+  onProgress,
+  describeFailure,
+}: {
+  method: string
+  url: string
+  body: XMLHttpRequestBodyInit
+  headers?: Record<string, string>
   onProgress?: (progress: UploadProgress) => void
-): Promise<void> {
+  describeFailure: (status: number, responseText: string) => string
+}): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
 
@@ -126,31 +157,56 @@ function uploadToSignedUrl(
     xhr.onload = () =>
       xhr.status >= 200 && xhr.status < 300
         ? resolve()
-        : reject(new Error(`Upload failed (${xhr.status}).`))
+        : reject(new Error(describeFailure(xhr.status, xhr.responseText)))
     xhr.onerror = () => reject(new Error("Upload failed."))
 
-    if (signed.method === "PUT") {
-      xhr.open("PUT", signed.url)
-      const headers = signed.headers ?? {}
-      for (const [name, value] of Object.entries(headers)) {
-        xhr.setRequestHeader(name, value)
-      }
-      const hasContentType = Object.keys(headers).some(
-        (name) => name.toLowerCase() === "content-type"
-      )
-      if (!hasContentType && file.type) {
-        xhr.setRequestHeader("Content-Type", file.type)
-      }
-      xhr.send(file)
-    } else {
-      const form = new FormData()
-      for (const [name, value] of Object.entries(signed.fields)) {
-        form.append(name, value)
-      }
-      form.append("file", file)
-      xhr.open("POST", signed.url)
-      xhr.send(form)
+    xhr.open(method, url)
+    for (const [name, value] of Object.entries(headers ?? {})) {
+      xhr.setRequestHeader(name, value)
     }
+    xhr.send(body)
+  })
+}
+
+/** Direct browser upload to a presigned URL, with byte progress. */
+function uploadToSignedUrl(
+  signed: SignedUpload,
+  file: File,
+  onProgress?: (progress: UploadProgress) => void
+): Promise<void> {
+  // The provider answers with an XML error document, which is no use in the
+  // progress panel — the status code is the readable part.
+  const describeFailure = (status: number) => `Upload failed (${status}).`
+
+  if (signed.method === "PUT") {
+    const headers = { ...signed.headers }
+    const hasContentType = Object.keys(headers).some(
+      (name) => name.toLowerCase() === "content-type"
+    )
+    if (!hasContentType && file.type) headers["Content-Type"] = file.type
+
+    return sendWithProgress({
+      method: "PUT",
+      url: signed.url,
+      body: file,
+      headers,
+      onProgress,
+      describeFailure,
+    })
+  }
+
+  const form = new FormData()
+  for (const [name, value] of Object.entries(signed.fields)) {
+    form.append(name, value)
+  }
+  form.append("file", file)
+
+  return sendWithProgress({
+    method: "POST",
+    url: signed.url,
+    body: form,
+    onProgress,
+    describeFailure,
   })
 }
 
@@ -168,7 +224,11 @@ type FileOps = {
   signFileUrls: (keys: string[]) => Promise<Record<string, string>>
   signUploadUrl: (key: string, contentType?: string) => Promise<SignedUpload>
   /** Direct server/browser upload — used where presigning isn't possible. */
-  uploadFile: (key: string, file: File) => Promise<void>
+  uploadFile: (
+    key: string,
+    file: File,
+    onProgress?: (progress: UploadProgress) => void
+  ) => Promise<void>
   createFolder: (path: string) => Promise<void>
   deleteEntry: (item: FileSystemItem) => Promise<void>
   renameEntry: (item: FileSystemItem, name: string) => Promise<void>
@@ -184,18 +244,23 @@ function serverOps(ref: ConnectionRef): FileOps {
     signFileUrls: (keys) => signFileUrlsAction(ref, keys),
     signUploadUrl: (key, contentType) =>
       signUploadUrlAction(ref, key, contentType),
-    uploadFile: async (key, file) => {
-      const body = new FormData()
-      body.append("ref", JSON.stringify(ref))
-      body.append("key", key)
-      body.append("file", file)
-      const response = await fetch(`${BASE_PATH}/api/upload`, {
+    uploadFile: async (key, file, onProgress) => {
+      // The raw file is the whole body — no multipart wrapper — so the route
+      // can pipe it upstream as it arrives instead of collecting it first.
+      // That is what makes the reported progress the real one.
+      await sendWithProgress({
         method: "POST",
-        body,
+        url: `${BASE_PATH}/api/upload?${new URLSearchParams({ key })}`,
+        body: file,
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+          [REF_HEADER]: encodeRefHeader(ref),
+        },
+        onProgress,
+        // This route answers with a plain-text reason worth showing.
+        describeFailure: (status, responseText) =>
+          responseText || `Could not upload file (${status}).`,
       })
-      if (!response.ok) {
-        throw new Error((await response.text()) || "Could not upload file.")
-      }
     },
     createFolder: (path) => createFolderAction(ref, path),
     deleteEntry: (item) => deleteEntryAction(ref, toEntryRef(item)),
@@ -243,10 +308,11 @@ async function makeClientOps(connection: Connection): Promise<FileOps> {
       assertWritable()
       return clientFileOps.signUploadUrl(files, key, contentType)
     },
-    uploadFile: async (key, file) => {
+    uploadFile: async (key, file, onProgress) => {
       assertWritable()
       await files.upload(key, file, {
         contentType: file.type || undefined,
+        onProgress,
       })
     },
     createFolder: async (path) => {
@@ -295,8 +361,14 @@ export function useS3FileSystem(connection: Connection | null): S3FileSystem {
     (state) => state.directClientRequests
   )
   // Only local connections can run in the browser — env credentials are blanked
-  // client-side, so those always go through the server.
-  const direct = directClientRequests && connection?.source === "local"
+  // client-side, so those always go through the server. WebDAV is excluded: a
+  // cross-origin PROPFIND/MKCOL carrying `Authorization` needs CORS that no
+  // stock Nextcloud/ownCloud/NAS grants, and digest auth cannot work from a
+  // browser at all.
+  const direct =
+    directClientRequests &&
+    connection?.source === "local" &&
+    connection.provider !== "webdav"
 
   const ref = React.useMemo<ConnectionRef | null>(
     () => (connection ? toConnectionRef(connection) : null),
@@ -384,11 +456,13 @@ export function useS3FileSystem(connection: Connection | null): S3FileSystem {
       // WebDAV can't presign: without a publicBaseUrl the browser has no
       // authenticated way to fetch the object, so route it through the server.
       if (connection?.provider === "webdav" && !connection.publicBaseUrl) {
-        return Promise.resolve(webdavProxyUrl(ref, file.key ?? file.path))
+        return Promise.resolve(
+          webdavProxyUrl(connection, file.key ?? file.path)
+        )
       }
       return urlBatcher.get(file.key ?? file.path)
     },
-    [connection, ref, urlBatcher]
+    [connection, urlBatcher]
   )
 
   const thumbnailHandle = React.useMemo(
@@ -408,7 +482,7 @@ export function useS3FileSystem(connection: Connection | null): S3FileSystem {
         // WebDAV has no presigned upload — stream it through the server (or,
         // in direct mode, straight from the browser's own client).
         if (connection?.provider === "webdav") {
-          await ops.uploadFile(key, file)
+          await ops.uploadFile(key, file, onProgress)
           return
         }
         const signed = await ops.signUploadUrl(key, file.type || undefined)
@@ -443,7 +517,7 @@ export function useS3FileSystem(connection: Connection | null): S3FileSystem {
           const key = item.key ?? item.path
           const url =
             connection?.provider === "webdav" && !connection.publicBaseUrl
-              ? webdavProxyUrl(ref, key, true)
+              ? webdavProxyUrl(connection, key, true)
               : await ops.signFileUrl(key)
           const name = item.name ?? key.split("/").pop() ?? "download"
           saveDownload(url, name)

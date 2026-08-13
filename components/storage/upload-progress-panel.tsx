@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 
 import type { UploadTask } from "@/lib/storage/hooks/use-uploads"
 import { cn } from "@/lib/utils"
+import { formatByteSize } from "@/components/explorer/internals"
 import {
   AppIcon,
   Cancel01Icon,
@@ -57,6 +58,12 @@ export function UploadProgressPanel({
               : task.status === "done"
                 ? 100
                 : 0
+          // Mid-upload the transferred amount is the useful half; once it is
+          // over only the total still says anything.
+          const size =
+            task.status === "uploading"
+              ? `${formatByteSize(task.loaded)} / ${formatByteSize(task.total)}`
+              : formatByteSize(task.total)
           return (
             <li key={task.id} className="rounded-md px-1.5 py-1.5">
               <div className="flex items-center gap-2">
@@ -94,12 +101,22 @@ export function UploadProgressPanel({
                 )}
               </div>
               {task.status === "uploading" ? (
-                <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full bg-primary transition-[width]"
-                    style={{ width: `${pct}%` }}
-                  />
+                // Indented to the same column as the name and the byte count;
+                // the padding goes on a wrapper so the track itself starts
+                // there rather than the fill floating inside a full-width one.
+                <div className="mt-1.5 pl-6">
+                  <div className="h-1 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full bg-primary transition-[width]"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
                 </div>
+              ) : null}
+              {size ? (
+                <p className="mt-1 pl-6 text-xs text-muted-foreground tabular-nums">
+                  {size}
+                </p>
               ) : null}
               {task.status === "error" && task.error ? (
                 <p className="mt-1 pl-6 text-xs text-destructive">

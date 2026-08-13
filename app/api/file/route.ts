@@ -1,4 +1,9 @@
-import type { ConnectionRef } from "@/lib/storage/connection-ref"
+import { readCookie } from "@/lib/auth/core"
+import {
+  PROXY_COOKIE_PREFIX,
+  type ConnectionRef,
+} from "@/lib/storage/connection-ref"
+import type { Connection } from "@/lib/storage/connections"
 import { resolveFiles } from "@/lib/storage/connections-server"
 import { normalizeError } from "@/lib/storage/file-operations"
 
@@ -6,23 +11,27 @@ export const dynamic = "force-dynamic"
 
 /**
  * Streams a single file through the server for adapters with no presigned
- * URL primitive (WebDAV). Auth is enforced by the global proxy; the `ref`
- * query param resolves to a credentialed client server-side.
+ * URL primitive (WebDAV). Auth is enforced by the global proxy.
+ *
+ * The query string names the connection by id only — a `local` connection's
+ * credentials arrive in its path-scoped cookie, because this URL is used as an
+ * `<img>`/media src and a download link and so ends up in browser history,
+ * `Referer` headers and access logs.
  *
  * Supports a single `Range` request (`bytes=start-end`) so video seeking and
  * resumable downloads work; `?download=1` forces an attachment disposition.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url)
-  const refParam = url.searchParams.get("ref")
+  const connectionId = url.searchParams.get("c")
   const key = url.searchParams.get("key")
-  if (!refParam || !key) {
+  if (!connectionId || !key) {
     return new Response("Invalid request.", { status: 400 })
   }
 
   let ref: ConnectionRef
   try {
-    ref = JSON.parse(refParam) as ConnectionRef
+    ref = refFor(request, connectionId)
   } catch {
     return new Response("Invalid request.", { status: 400 })
   }
@@ -90,6 +99,21 @@ export async function GET(request: Request) {
     const isMissing = /\(NotFound\)/.test(err.message)
     return new Response(err.message, { status: isMissing ? 404 : 502 })
   }
+}
+
+/**
+ * A `local` connection is read from its cookie; anything else is treated as an
+ * env id, which `resolveFiles` rejects when it doesn't exist. A connection is
+ * never accepted from the query string — that is what keeps credentials out of
+ * the URL, and it stops the route from proxying to a caller-chosen host.
+ */
+function refFor(request: Request, id: string): ConnectionRef {
+  const cookie = readCookie(
+    request,
+    `${PROXY_COOKIE_PREFIX}${encodeURIComponent(id)}`
+  )
+  if (!cookie) return { source: "env", id }
+  return { source: "local", connection: JSON.parse(cookie) as Connection }
 }
 
 /** Parse a single `bytes=start-end` range; `end` is inclusive. */

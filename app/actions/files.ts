@@ -8,7 +8,6 @@ import {
   resolveFiles,
 } from "@/lib/storage/connections-server"
 import * as fileOps from "@/lib/storage/file-operations"
-import { normalizeError } from "@/lib/storage/file-operations"
 import type { EntryRef, SignedUpload } from "@/lib/storage/files-client"
 import type { FileSystemLoadChildrenResult } from "@/components/explorer/types"
 
@@ -17,13 +16,9 @@ export async function listEnvConnectionsAction(): Promise<Connection[]> {
   return listPublicEnvConnections()
 }
 
-/** Validate a connection's credentials + CORS with a tiny list. */
+/** Validate a connection's credentials + CORS with one cheap round trip. */
 export async function testConnectionAction(ref: ConnectionRef): Promise<void> {
-  try {
-    await resolveFiles(ref).list({ limit: 1 })
-  } catch (error) {
-    throw normalizeError(error)
-  }
+  return fileOps.probeConnection(resolveFiles(ref))
 }
 
 /** One page of a folder, mapped to the FileSystem manifest shape. */

@@ -59,7 +59,7 @@
     "showHiddenFiles": "Show hidden files",
     "showHiddenFilesHint": "Display dot-prefixed files and folders, such as .env or .well-known, in the file browser.",
     "directClientRequests": "Direct client requests",
-    "directClientRequestsHint": "When on, connections you add in the app talk to storage directly from your browser instead of routing through this app's server. Requires the bucket to have CORS configured.",
+    "directClientRequestsHint": "When on, connections you add in the app talk to storage directly from your browser instead of routing through this app's server. Requires the bucket to have CORS configured. WebDAV connections always route through the server.",
     "appDescription": "Open-source file browser for S3, R2, and other storage backends. Browse, preview, search, and manage files in a modern, self-hosted web interface.",
     "version": "Version",
     "license": "License",

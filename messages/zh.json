@@ -59,7 +59,7 @@
     "showHiddenFiles": "显示隐藏文件",
     "showHiddenFilesHint": "在文件浏览器中显示以点开头的文件和文件夹，例如 .env 或 .well-known。",
     "directClientRequests": "客户端直连请求",
-    "directClientRequestsHint": "开启后，你在应用内手动添加的连接将直接从浏览器访问存储，不再经过本应用服务端中转。需存储桶已配置 CORS。",
+    "directClientRequestsHint": "开启后，你在应用内手动添加的连接将直接从浏览器访问存储，不再经过本应用服务端中转。需存储桶已配置 CORS。WebDAV 连接始终经服务端中转。",
     "appDescription": "一款面向 S3、R2 和其他存储后端的开源文件浏览器，提供现代化的自托管 Web 界面，让您轻松浏览、预览、搜索和管理文件。",
     "version": "版本",
     "license": "许可",

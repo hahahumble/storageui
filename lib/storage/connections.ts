@@ -23,9 +23,22 @@ export type ConnectionProvider =
   | "s3-compatible"
   | "webdav"
 
-/** WebDAV auth strategy — mirrors the `webdav` client's `AuthType`. */
-export type WebdavAuthType =
-  "auto" | "basic" | "digest" | "none" | "password" | "token"
+/**
+ * WebDAV auth strategy — mirrors the `webdav` client's `AuthType`, minus
+ * `token`: that one needs a bearer token this app has no field for, so it
+ * could only ever fail at request time. `basic` and `password` are the same
+ * strategy under both names.
+ */
+export type WebdavAuthType = "auto" | "basic" | "digest" | "none" | "password"
+
+/** Every accepted {@link WebdavAuthType}, for validating env input. */
+export const WEBDAV_AUTH_TYPES: readonly WebdavAuthType[] = [
+  "auto",
+  "basic",
+  "digest",
+  "none",
+  "password",
+]
 
 export type Connection = {
   id: string

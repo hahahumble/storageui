@@ -14,6 +14,7 @@ import type { ConnectionRef } from "@/lib/storage/connection-ref"
 import {
   ENV_CONNECTION_ID,
   ENV_CONNECTION_ID_PREFIX,
+  WEBDAV_AUTH_TYPES,
   type Connection,
   type ConnectionProvider,
   type WebdavAuthType,
@@ -84,6 +85,21 @@ const LEGACY_ENV_SLOT: RawEnvSlot = {
   readOnly: process.env.S3_READ_ONLY,
 }
 
+/**
+ * An unrecognized value would otherwise reach the adapter and throw on every
+ * single operation, while the bucket still showed up in the sidebar.
+ */
+function parseAuthType(value: string | undefined): WebdavAuthType | undefined {
+  if (!value) return undefined
+  if ((WEBDAV_AUTH_TYPES as readonly string[]).includes(value)) {
+    return value as WebdavAuthType
+  }
+  console.warn(
+    `Ignoring unknown WebDAV auth type ${JSON.stringify(value)}. Expected one of: ${WEBDAV_AUTH_TYPES.join(", ")}.`
+  )
+  return undefined
+}
+
 function slotToConnection(raw: RawEnvSlot, id: string): Connection | null {
   const provider = (raw.provider as ConnectionProvider | undefined) ?? "s3"
 
@@ -97,7 +113,7 @@ function slotToConnection(raw: RawEnvSlot, id: string): Connection | null {
       endpoint: raw.endpoint,
       accessKeyId: raw.username ?? raw.accessKeyId ?? "",
       secretAccessKey: raw.password ?? raw.secretAccessKey ?? "",
-      authType: (raw.authType as WebdavAuthType | undefined) ?? undefined,
+      authType: parseAuthType(raw.authType),
       root: raw.root || undefined,
       publicBaseUrl: raw.publicBaseUrl || undefined,
       readOnly: raw.readOnly === "true",
@@ -305,6 +321,77 @@ function buildFiles(connection: Connection): FilesClient {
 }
 
 /**
+ * A `local` ref names whatever endpoint the caller chose, so every server-side
+ * fetch on its behalf is a request the caller aimed — pointed at the cloud
+ * metadata service or an admin panel on the deployment's own network, that is
+ * an SSRF. Login is optional in this app, so the check cannot lean on auth.
+ * Env-configured connections are the operator's own and are never checked.
+ *
+ * Deployments that legitimately browse a LAN NAS or a sibling container set
+ * `ALLOW_PRIVATE_ENDPOINTS=true`; local development is exempt.
+ */
+const ALLOW_PRIVATE_ENDPOINTS =
+  process.env.ALLOW_PRIVATE_ENDPOINTS === "true" ||
+  process.env.NODE_ENV !== "production"
+
+function isPrivateHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "")
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal")
+  ) {
+    return true
+  }
+
+  const ipv4 = /^(?:::ffff:)?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/.exec(
+    host
+  )
+  if (ipv4) {
+    const first = Number(ipv4[1])
+    const second = Number(ipv4[2])
+    return (
+      first === 0 ||
+      first === 10 ||
+      first === 127 ||
+      (first === 169 && second === 254) ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168) ||
+      (first === 100 && second >= 64 && second <= 127)
+    )
+  }
+
+  // ::, ::1, fc00::/7 (unique local), fe80::/10 (link-local).
+  return (
+    host === "::" ||
+    host === "::1" ||
+    /^f[cd][0-9a-f]{2}:/.test(host) ||
+    /^fe[89ab][0-9a-f]:/.test(host)
+  )
+}
+
+function assertEndpointAllowed(value: string | undefined, label: string): void {
+  if (!value) return
+
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error(`${label} is not a valid URL.`)
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`${label} must use http or https.`)
+  }
+  if (!ALLOW_PRIVATE_ENDPOINTS && isPrivateHostname(url.hostname)) {
+    throw new Error(
+      `${label} points at a private address. Set ALLOW_PRIVATE_ENDPOINTS=true on the server to allow it.`
+    )
+  }
+}
+
+/**
  * Resolve a {@link ConnectionRef} from the browser to a credentialed `Files`
  * client. `env` refs are looked up in server-only env (the client only sent an
  * id); `local` refs carry the user's own credentials.
@@ -317,11 +404,28 @@ function resolveConnection(ref: ConnectionRef): Connection {
     }
     return connection
   }
+
+  assertEndpointAllowed(ref.connection.endpoint, "Endpoint")
+  assertEndpointAllowed(ref.connection.publicBaseUrl, "Public base URL")
   return ref.connection
 }
 
 export function resolveFiles(ref: ConnectionRef): FilesClient {
   return buildFiles(resolveConnection(ref))
+}
+
+/**
+ * Whether the `webdav` client may re-issue a request for this connection. Both
+ * `auto` and `digest` send once, read the challenge off a 401, then send again
+ * — which a streamed body cannot survive, since it has already been consumed.
+ * Callers that stream must buffer instead.
+ */
+export function connectionReissuesRequests(ref: ConnectionRef): boolean {
+  const connection = resolveConnection(ref)
+  if (connection.provider !== "webdav") return false
+
+  const authType = connection.authType ?? "password"
+  return authType === "auto" || authType === "digest"
 }
 
 /** Enforce the per-connection read-only policy before any mutation is signed. */
