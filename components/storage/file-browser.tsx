@@ -19,6 +19,7 @@ import {
 import { useNavStore } from "@/lib/store/nav-store"
 import { usePreferencesStore } from "@/lib/store/preferences-store"
 import { useUploadUiStore } from "@/lib/store/upload-ui-store"
+import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { SidebarTrigger } from "@/components/ui/sidebar"
@@ -293,107 +294,110 @@ export function FileBrowser() {
       }}
       onDrop={handleDrop}
     >
-      {section === "all" ? (
-        <FileSystem
-          key={activeConnection.id}
-          items={items}
-          isLoading={isLoading}
-          reloadToken={refreshNonce}
-          title={activeConnection.name}
-          titleBadge={
-            isReadOnly ? (
-              <Badge variant="outline" className={NEUTRAL_BADGE_CLASSNAME}>
-                {t("readOnly")}
-              </Badge>
-            ) : undefined
-          }
-          headerLeading={<MobileSidebarTrigger />}
-          view={browserSettings.view}
-          onViewChangeAction={(view) => setBucketView(bucketKey, view)}
-          sort={browserSettings.sort}
-          onSortChangeAction={(sort) => setBucketSort(bucketKey, sort)}
-          filters={browserSettings.filters}
-          onFiltersChangeAction={(filters) =>
-            setBucketFilters(bucketKey, filters)
-          }
-          showHiddenFiles={showHiddenFiles}
-          showFileExtensions={showFileExtensions}
-          className="min-h-0 flex-1 rounded-none border-0"
-          defaultPath={currentPath}
-          loadChildren={loadChildren}
-          getFileUrl={getFileUrl}
-          renderFilePreview={renderFilePreview}
-          onCreateFolderAction={
-            isReadOnly
-              ? undefined
-              : async (path) => {
-                  await createFolder(path)
-                  refresh()
-                  setRefreshNonce((nonce) => nonce + 1)
-                }
-          }
-          onDownloadEntry={downloadEntry}
-          onDeleteEntry={
-            isReadOnly
-              ? undefined
-              : async (item) => {
+      <FileSystem
+        key={activeConnection.id}
+        items={items}
+        isLoading={isLoading}
+        reloadToken={refreshNonce}
+        title={activeConnection.name}
+        titleBadge={
+          isReadOnly ? (
+            <Badge variant="outline" className={NEUTRAL_BADGE_CLASSNAME}>
+              {t("readOnly")}
+            </Badge>
+          ) : undefined
+        }
+        headerLeading={<MobileSidebarTrigger />}
+        view={browserSettings.view}
+        onViewChangeAction={(view) => setBucketView(bucketKey, view)}
+        sort={browserSettings.sort}
+        onSortChangeAction={(sort) => setBucketSort(bucketKey, sort)}
+        filters={browserSettings.filters}
+        onFiltersChangeAction={(filters) =>
+          setBucketFilters(bucketKey, filters)
+        }
+        showHiddenFiles={showHiddenFiles}
+        showFileExtensions={showFileExtensions}
+        className={cn(
+          "min-h-0 flex-1 rounded-none border-0",
+          section !== "all" && "hidden"
+        )}
+        defaultPath={currentPath}
+        loadChildren={loadChildren}
+        getFileUrl={getFileUrl}
+        renderFilePreview={renderFilePreview}
+        onCreateFolderAction={
+          isReadOnly
+            ? undefined
+            : async (path) => {
+                await createFolder(path)
+                refresh()
+                setRefreshNonce((nonce) => nonce + 1)
+              }
+        }
+        onDownloadEntry={downloadEntry}
+        onDeleteEntry={
+          isReadOnly
+            ? undefined
+            : async (item) => {
+                await deleteEntry(item)
+                refresh()
+                setRefreshNonce((nonce) => nonce + 1)
+              }
+        }
+        onDeleteEntries={
+          isReadOnly
+            ? undefined
+            : async (items, onProgress) => {
+                let done = 0
+                for (const item of items) {
                   await deleteEntry(item)
-                  refresh()
-                  setRefreshNonce((nonce) => nonce + 1)
+                  onProgress?.(++done, items.length)
                 }
-          }
-          onDeleteEntries={
-            isReadOnly
-              ? undefined
-              : async (items, onProgress) => {
-                  let done = 0
-                  for (const item of items) {
-                    await deleteEntry(item)
-                    onProgress?.(++done, items.length)
-                  }
-                  refresh()
-                  setRefreshNonce((nonce) => nonce + 1)
-                }
-          }
-          onRenameEntryAction={
-            isReadOnly
-              ? undefined
-              : async (item, name) => {
-                  await renameEntry(item, name)
-                  refresh()
-                  setRefreshNonce((nonce) => nonce + 1)
-                }
-          }
-          onMoveEntry={
-            isReadOnly
-              ? undefined
-              : async (item, destinationFolder) => {
+                refresh()
+                setRefreshNonce((nonce) => nonce + 1)
+              }
+        }
+        onRenameEntryAction={
+          isReadOnly
+            ? undefined
+            : async (item, name) => {
+                await renameEntry(item, name)
+                refresh()
+                setRefreshNonce((nonce) => nonce + 1)
+              }
+        }
+        onMoveEntry={
+          isReadOnly
+            ? undefined
+            : async (item, destinationFolder) => {
+                await moveEntry(item, destinationFolder)
+                refresh()
+                setRefreshNonce((nonce) => nonce + 1)
+              }
+        }
+        onMoveEntries={
+          isReadOnly
+            ? undefined
+            : async (items, destinationFolder, onProgress) => {
+                let done = 0
+                for (const item of items) {
                   await moveEntry(item, destinationFolder)
-                  refresh()
-                  setRefreshNonce((nonce) => nonce + 1)
+                  onProgress?.(++done, items.length)
                 }
-          }
-          onMoveEntries={
-            isReadOnly
-              ? undefined
-              : async (items, destinationFolder, onProgress) => {
-                  let done = 0
-                  for (const item of items) {
-                    await moveEntry(item, destinationFolder)
-                    onProgress?.(++done, items.length)
-                  }
-                  refresh()
-                  setRefreshNonce((nonce) => nonce + 1)
-                }
-          }
-          isStarred={(item) => starredKeys.has(item.key ?? item.path)}
-          onToggleStar={(item) => toggleStar(bucketKey, toMarkedFile(item))}
-          onPathChangeAction={(path) =>
-            setFolder({ connId: activeConnection.id, path })
-          }
-          onFileOpen={openFile}
-        />
-      ) : (
+                refresh()
+                setRefreshNonce((nonce) => nonce + 1)
+              }
+        }
+        isStarred={(item) => starredKeys.has(item.key ?? item.path)}
+        onToggleStar={(item) => toggleStar(bucketKey, toMarkedFile(item))}
+        onPathChangeAction={(path) =>
+          setFolder({ connId: activeConnection.id, path })
+        }
+        onFileOpen={openFile}
+      />
+
+      {section !== "all" ? (
         <MarkedFilesView
           section={section}
           connectionName={activeConnection.name}
@@ -405,7 +409,7 @@ export function FileBrowser() {
           onClearRecentsAction={() => clearRecents(bucketKey)}
           showFileExtensions={showFileExtensions}
         />
-      )}
+      ) : null}
 
       {isDragging ? (
         <div className="pointer-events-none absolute inset-0 z-40 p-2.5">
