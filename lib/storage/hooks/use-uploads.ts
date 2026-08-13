@@ -21,6 +21,57 @@ export function normalizePrefix(input: string): string {
   return trimmed.endsWith("/") ? trimmed : `${trimmed}/`
 }
 
+/** A file to upload, with the path it should take relative to the destination. */
+export type UploadItem = { file: File; path: string }
+
+/**
+ * Expand a drop into the actual files it contains.
+ *
+ * `dataTransfer.files` reports a dropped *folder* as a single entry named after
+ * the folder, with a nonsense size and no readable contents — uploading that is
+ * what fails. Only the entry API can see inside a directory, so directories are
+ * walked, and each file keeps its path so the tree is recreated rather than
+ * flattened. Empty directories carry no files and so are not created.
+ *
+ * The entries must be taken from the live event; `DataTransfer` goes inert as
+ * soon as the handler returns, which is why this takes them already collected.
+ */
+export async function expandDropEntries(
+  entries: FileSystemEntry[]
+): Promise<UploadItem[]> {
+  const items: UploadItem[] = []
+  for (const entry of entries) await walkEntry(entry, "", items)
+  return items
+}
+
+async function walkEntry(
+  entry: FileSystemEntry,
+  prefix: string,
+  items: UploadItem[]
+): Promise<void> {
+  if (entry.isFile) {
+    const file = await new Promise<File>((resolve, reject) => {
+      ;(entry as FileSystemFileEntry).file(resolve, reject)
+    })
+    items.push({ file, path: `${prefix}${entry.name}` })
+    return
+  }
+  if (!entry.isDirectory) return
+
+  const reader = (entry as FileSystemDirectoryEntry).createReader()
+  const dir = `${prefix}${entry.name}/`
+
+  // readEntries hands back one batch per call (capped at 100 in Chrome); an
+  // empty batch is the only end-of-directory signal.
+  for (;;) {
+    const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+      reader.readEntries(resolve, reject)
+    })
+    if (batch.length === 0) return
+    for (const child of batch) await walkEntry(child, dir, items)
+  }
+}
+
 let counter = 0
 function nextId() {
   counter += 1
@@ -58,20 +109,23 @@ export function useUploads({
     onBatchCompleteRef.current = onBatchComplete
   }, [onBatchComplete])
 
-  const enqueue = React.useCallback((files: File[], prefix: string) => {
-    if (files.length === 0) return
+  const enqueue = React.useCallback((items: UploadItem[], prefix: string) => {
+    if (items.length === 0) return
     const dest = normalizePrefix(prefix)
-    const entries = files.map((file) => ({
+    const entries = items.map(({ file, path }) => ({
       id: nextId(),
       file,
-      key: `${dest}${file.name}`,
+      path,
+      key: `${dest}${path}`,
     }))
 
     setTasks((prev) => [
       ...prev,
       ...entries.map((e) => ({
         id: e.id,
-        name: e.file.name,
+        // The path, not the bare filename: in a folder upload it is the only
+        // thing that distinguishes one `slide1.png` from another.
+        name: e.path,
         key: e.key,
         status: "uploading" as UploadTaskStatus,
         loaded: 0,

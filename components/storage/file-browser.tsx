@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl"
 
 import { getFileKind } from "@/lib/file-kind"
 import { useS3FileSystem } from "@/lib/storage/hooks/use-file-system"
-import { useUploads } from "@/lib/storage/hooks/use-uploads"
+import { expandDropEntries, useUploads } from "@/lib/storage/hooks/use-uploads"
 import {
   bucketBrowserKey,
   DEFAULT_BUCKET_BROWSER_SETTINGS,
@@ -216,9 +216,22 @@ export function FileBrowser() {
     dragDepth.current = 0
     setIsDragging(false)
     if (section !== "all" || isReadOnly) return
-    if (e.dataTransfer.files.length) {
-      enqueue(Array.from(e.dataTransfer.files), currentPath)
-    }
+
+    // Read the entries synchronously — `DataTransfer` is emptied the moment
+    // this handler returns, so it cannot be touched after an await. A dropped
+    // folder only reveals its contents through the entry API; `files` alone
+    // would report it as one unreadable entry.
+    const entries = Array.from(e.dataTransfer.items)
+      .map((item) => item.webkitGetAsEntry())
+      .filter((entry): entry is FileSystemEntry => entry !== null)
+    const plainFiles = Array.from(e.dataTransfer.files)
+
+    void (async () => {
+      const items = entries.length
+        ? await expandDropEntries(entries)
+        : plainFiles.map((file) => ({ file, path: file.name }))
+      enqueue(items, currentPath)
+    })()
   }
 
   // Opening any file (from the browser or the Recents/Starred lists) records it
@@ -440,7 +453,13 @@ export function FileBrowser() {
         className="hidden"
         onChange={(e) => {
           if (!isReadOnly && e.target.files?.length) {
-            enqueue(Array.from(e.target.files), currentPath)
+            enqueue(
+              Array.from(e.target.files).map((file) => ({
+                file,
+                path: file.webkitRelativePath || file.name,
+              })),
+              currentPath
+            )
           }
           e.target.value = ""
         }}
