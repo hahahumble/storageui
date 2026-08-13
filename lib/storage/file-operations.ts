@@ -35,6 +35,11 @@ export function normalizeError(error: unknown): Error {
   return new Error(String(error))
 }
 
+/** Duck-typed adapter check — this module must stay free of sdk value imports. */
+function isWebdavAdapter(files: FilesClient): boolean {
+  return (files as { adapter?: { name?: string } }).adapter?.name === "webdav"
+}
+
 function parentPath(path: string) {
   const normalized = path.endsWith("/") ? path.slice(0, -1) : path
   const separatorIndex = normalized.lastIndexOf("/")
@@ -96,6 +101,30 @@ export async function listFolder(
         etag: file.etag,
       }))
 
+    // WebDAV: the adapter derives prefixes from file keys, so directories
+    // with no file descendants never surface. Merge them in from a depth-1
+    // PROPFIND of the current folder. First page only — a follow-up cursor
+    // page would re-add the same folders.
+    const adapter = (files as { adapter?: { name?: string; root?: string } })
+      .adapter
+    if (adapter?.name === "webdav" && !cursor) {
+      try {
+        const known = new Set(folders.map((folder) => folder.path))
+        for (const path of await listWebdavEmptyFolders(
+          files,
+          adapter.root ?? "/",
+          prefix
+        )) {
+          if (!known.has(path)) {
+            folders.push({ kind: "folder", path, hasChildren: true })
+          }
+        }
+      } catch {
+        // Best-effort: an empty-directory PROPFIND failure must not fail the
+        // listing itself (e.g. the folder vanished between the two calls).
+      }
+    }
+
     return {
       items: [...folders, ...fileItems],
       nextCursor: result.cursor ?? null,
@@ -103,6 +132,57 @@ export async function listFolder(
   } catch (error) {
     throw normalizeError(error)
   }
+}
+
+/**
+ * Immediate empty directories under a WebDAV folder, as `"name/"` keys. The
+ * sdk's `list` only ever reports folders that contain files, so these would
+ * otherwise be invisible right after `createFolder`.
+ */
+async function listWebdavEmptyFolders(
+  files: FilesClient,
+  root: string,
+  prefix: string
+): Promise<string[]> {
+  const raw = (files as { raw?: unknown }).raw as
+    | {
+        getDirectoryContents?: (
+          path: string,
+          options?: { details?: boolean }
+        ) => Promise<
+          Array<{ type?: string; basename?: string; filename?: string }>
+        >
+      }
+    | null
+    | undefined
+  if (!raw?.getDirectoryContents) return []
+
+  const entries = await raw.getDirectoryContents(
+    webdavRemotePath(root, prefix),
+    { details: false }
+  )
+
+  const base = prefix.endsWith("/") ? prefix : prefix ? `${prefix}/` : ""
+  const folders: string[] = []
+  for (const entry of entries) {
+    if (entry.type !== "directory") continue
+    const name = entry.basename ?? entry.filename?.split("/").pop() ?? ""
+    if (!name || name === "." || name === "..") continue
+    folders.push(`${base}${name}/`)
+  }
+  return folders
+}
+
+/** Map a virtual prefix to the server-side path, mirroring the adapter's `keyToRemote`. */
+function webdavRemotePath(root: string, prefix: string): string {
+  const absolute = root.startsWith("/")
+  const rootInner = root === "." ? "" : root.replace(/^\/+|\/+$/g, "")
+  const inner = prefix.replace(/^\/+|\/+$/g, "")
+  if (!rootInner) {
+    return absolute ? (inner ? `/${inner}` : "/") : inner
+  }
+  const base = `${absolute ? "/" : ""}${rootInner}`
+  return inner ? `${base}/${inner}` : base
 }
 
 /** Presigned GET URL for previewing/downloading a single object. */
@@ -165,6 +245,26 @@ export async function createFolder(
 ): Promise<void> {
   const key = path.endsWith("/") ? path : `${path}/`
   try {
+    // WebDAV has no folder markers — a trailing-slash PUT would hit the
+    // collection URL, which most servers reject. Issue an MKCOL through the
+    // adapter's raw client instead.
+    if (isWebdavAdapter(files)) {
+      const client = (files as { raw?: unknown }).raw as
+        | {
+            createDirectory?: (
+              dirPath: string,
+              options?: { recursive?: boolean }
+            ) => Promise<unknown>
+          }
+        | null
+        | undefined
+      if (!client?.createDirectory) {
+        throw new Error("WebDAV client unavailable.")
+      }
+      await client.createDirectory(key, { recursive: true })
+      return
+    }
+
     await files.upload(key, new Uint8Array(), {
       contentType: "application/x-directory",
     })
@@ -185,6 +285,13 @@ export async function deleteEntry(
     }
 
     const prefix = item.path.endsWith("/") ? item.path : `${item.path}/`
+    // WebDAV deletes collections in one native DELETE (recursive per RFC
+    // 4918) — deleting only the files would leave empty directories behind.
+    if (isWebdavAdapter(files)) {
+      await files.delete(prefix)
+      return
+    }
+
     const keys = await listKeys(files, prefix)
     if (keys.length === 0) return
 
@@ -234,6 +341,13 @@ export async function renameEntry(
       (await prefixExists(files, destinationPrefix))
     ) {
       throw new Error("An item with this name already exists.")
+    }
+
+    // WebDAV moves collections natively in one MOVE — and it covers empty
+    // folders, which the per-object loop below cannot (no keys to move).
+    if (isWebdavAdapter(files)) {
+      await files.move(sourcePrefix, destinationPrefix)
+      return
     }
 
     const keys = await listKeys(files, sourcePrefix)
@@ -301,6 +415,12 @@ export async function moveEntry(
       (await prefixExists(files, destinationPrefix))
     ) {
       throw new Error("An item with this name already exists there.")
+    }
+
+    // Native collection MOVE — also moves empty folders.
+    if (isWebdavAdapter(files)) {
+      await files.move(sourcePrefix, destinationPrefix)
+      return
     }
 
     const keys = await listKeys(files, sourcePrefix)

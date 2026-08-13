@@ -8,6 +8,7 @@ import {
   createConnectionId,
   type Connection,
   type ConnectionProvider,
+  type WebdavAuthType,
 } from "@/lib/storage/connections"
 import { useConnections } from "@/lib/store/connection-store"
 import { Button } from "@/components/ui/button"
@@ -41,6 +42,7 @@ import {
   AppIcon,
   CloudServerIcon,
   Delete02Icon,
+  FolderLibraryIcon,
 } from "@/components/foundations/icons"
 import { testConnectionAction } from "@/app/actions/files"
 
@@ -52,6 +54,16 @@ const PROVIDER_OPTIONS: { value: ConnectionProvider; label: string }[] = [
   { value: "minio", label: "MinIO" },
   { value: "tencent", label: "Tencent Cloud COS" },
   { value: "s3-compatible", label: "S3-compatible (custom endpoint)" },
+  { value: "webdav", label: "WebDAV (Nextcloud, ownCloud, NAS…)" },
+]
+
+const WEBDAV_AUTH_OPTIONS: Array<{
+  labelKey: "authPassword" | "authDigest" | "authNone"
+  value: WebdavAuthType
+}> = [
+  { labelKey: "authPassword", value: "password" },
+  { labelKey: "authDigest", value: "digest" },
+  { labelKey: "authNone", value: "none" },
 ]
 
 const PROVIDER_ICON_CLASS_NAME =
@@ -79,14 +91,23 @@ function ConnectionProviderIcon({
       return <TencentIcon className={className} />
     case "s3-compatible":
       return <AppIcon icon={CloudServerIcon} className={className} />
+    case "webdav":
+      return <AppIcon icon={FolderLibraryIcon} className={className} />
   }
 }
 
 function describeConnectionError(
   err: unknown,
-  t: (key: string) => string
+  t: (key: string) => string,
+  provider?: ConnectionProvider
 ): string {
   const message = err instanceof Error ? err.message : String(err)
+  if (provider === "webdav") {
+    if (/\(Unauthorized\)|Invalid response: 4\d\d/.test(message)) {
+      return t("webdavErrorConnect")
+    }
+    return message || t("errorGeneric")
+  }
   if (/\(Unauthorized\)/.test(message)) {
     return t("errorAccessDenied")
   }
@@ -107,6 +128,8 @@ type FormState = {
   secretAccessKey: string
   publicBaseUrl: string
   forcePathStyle: boolean
+  authType: WebdavAuthType
+  root: string
 }
 
 const EMPTY_FORM: FormState = {
@@ -120,6 +143,8 @@ const EMPTY_FORM: FormState = {
   secretAccessKey: "",
   publicBaseUrl: "",
   forcePathStyle: false,
+  authType: "password",
+  root: "",
 }
 
 function formFromConnection(connection: Connection): FormState {
@@ -134,6 +159,8 @@ function formFromConnection(connection: Connection): FormState {
     secretAccessKey: connection.secretAccessKey,
     publicBaseUrl: connection.publicBaseUrl ?? "",
     forcePathStyle: connection.forcePathStyle ?? false,
+    authType: connection.authType ?? "password",
+    root: connection.root ?? "",
   }
 }
 
@@ -147,22 +174,29 @@ function buildConnection(
   const isMinio = form.provider === "minio"
   const isTencent = form.provider === "tencent"
   const isS3Compatible = form.provider === "s3-compatible"
+  const isWebdav = form.provider === "webdav"
   const supportsEndpointOverride =
     isS3Compatible || isAlibaba || isBackblaze || isMinio || isTencent
 
   return {
     id: existing?.id ?? createConnectionId(),
-    name: form.name.trim() || form.bucket.trim(),
+    name:
+      form.name.trim() ||
+      (isWebdav ? form.endpoint.trim() : form.bucket.trim()),
     provider: form.provider,
-    bucket: form.bucket.trim(),
-    region: !isR2 ? form.region.trim() || undefined : undefined,
-    endpoint: supportsEndpointOverride
-      ? form.endpoint.trim() || undefined
-      : undefined,
-    forcePathStyle: supportsEndpointOverride && form.forcePathStyle,
+    bucket: isWebdav ? "" : form.bucket.trim(),
+    region: !isR2 && !isWebdav ? form.region.trim() || undefined : undefined,
+    endpoint:
+      isWebdav || supportsEndpointOverride
+        ? form.endpoint.trim() || undefined
+        : undefined,
+    forcePathStyle:
+      !isWebdav && supportsEndpointOverride && form.forcePathStyle,
     accountId: isR2 ? form.accountId.trim() || undefined : undefined,
     accessKeyId: form.accessKeyId.trim(),
     secretAccessKey: form.secretAccessKey.trim(),
+    authType: isWebdav ? form.authType : undefined,
+    root: isWebdav ? form.root.trim() || undefined : undefined,
     publicBaseUrl: form.publicBaseUrl.trim() || undefined,
     source: "local",
   }
@@ -228,15 +262,19 @@ export function AddConnectionDialog() {
     (option) => option.value === provider
   )
   const canSubmit =
-    form.bucket.trim() &&
-    form.accessKeyId.trim() &&
-    form.secretAccessKey.trim() &&
-    (provider !== "r2" || form.accountId.trim()) &&
-    (provider !== "alibaba" || form.region.trim()) &&
-    (provider !== "backblaze-b2" || form.region.trim()) &&
-    (provider !== "tencent" || form.region.trim()) &&
-    (provider !== "minio" || form.endpoint.trim()) &&
-    (provider !== "s3-compatible" || form.endpoint.trim()) &&
+    (provider === "webdav"
+      ? form.endpoint.trim() &&
+        (form.authType === "none" ||
+          (form.accessKeyId.trim() && form.secretAccessKey.trim()))
+      : form.bucket.trim() &&
+        form.accessKeyId.trim() &&
+        form.secretAccessKey.trim() &&
+        (provider !== "r2" || form.accountId.trim()) &&
+        (provider !== "alibaba" || form.region.trim()) &&
+        (provider !== "backblaze-b2" || form.region.trim()) &&
+        (provider !== "tencent" || form.region.trim()) &&
+        (provider !== "minio" || form.endpoint.trim()) &&
+        (provider !== "s3-compatible" || form.endpoint.trim())) &&
     status !== "testing"
 
   async function handleSubmit(event: React.FormEvent) {
@@ -253,7 +291,7 @@ export function AddConnectionDialog() {
       else addConnection(connection)
       setAddDialogOpen(false)
     } catch (err) {
-      setError(describeConnectionError(err, t))
+      setError(describeConnectionError(err, t, connection.provider))
     } finally {
       setStatus("idle")
     }
@@ -342,14 +380,91 @@ export function AddConnectionDialog() {
                 />
               </Field>
 
-              <Field label={t("bucket")} required>
-                <Input
-                  value={form.bucket}
-                  onChange={(e) => update("bucket", e.target.value)}
-                  placeholder="my-bucket"
-                  required
-                />
-              </Field>
+              {provider !== "webdav" ? (
+                <Field label={t("bucket")} required>
+                  <Input
+                    value={form.bucket}
+                    onChange={(e) => update("bucket", e.target.value)}
+                    placeholder="my-bucket"
+                    required
+                  />
+                </Field>
+              ) : null}
+
+              {provider === "webdav" ? (
+                <>
+                  <Field
+                    label={t("webdavBaseUrl")}
+                    hint={t("webdavBaseUrlHint")}
+                    required
+                  >
+                    <Input
+                      value={form.endpoint}
+                      onChange={(e) => update("endpoint", e.target.value)}
+                      placeholder="https://cloud.example.com/remote.php/dav/files/me"
+                      autoComplete="off"
+                      required
+                    />
+                  </Field>
+                  <Field label={t("webdavAuthType")}>
+                    <Select
+                      value={form.authType}
+                      onValueChange={(value) =>
+                        update("authType", value as WebdavAuthType)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue>
+                          {t(
+                            WEBDAV_AUTH_OPTIONS.find(
+                              (option) => option.value === form.authType
+                            )?.labelKey ?? "authPassword"
+                          )}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {WEBDAV_AUTH_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {t(option.labelKey)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  {form.authType !== "none" ? (
+                    <>
+                      <Field label={t("username")} required>
+                        <Input
+                          value={form.accessKeyId}
+                          onChange={(e) =>
+                            update("accessKeyId", e.target.value)
+                          }
+                          autoComplete="off"
+                          required
+                        />
+                      </Field>
+                      <Field label={t("password")} required>
+                        <Input
+                          type="password"
+                          value={form.secretAccessKey}
+                          onChange={(e) =>
+                            update("secretAccessKey", e.target.value)
+                          }
+                          autoComplete="off"
+                          required
+                        />
+                      </Field>
+                    </>
+                  ) : null}
+                  <Field label={t("webdavRoot")} hint={t("webdavRootHint")}>
+                    <Input
+                      value={form.root}
+                      onChange={(e) => update("root", e.target.value)}
+                      placeholder="/uploads"
+                    />
+                  </Field>
+                </>
+              ) : null}
 
               {provider === "r2" ? (
                 <Field
@@ -543,46 +658,59 @@ export function AddConnectionDialog() {
                 </>
               ) : null}
 
-              <Field
-                label={
-                  provider === "backblaze-b2"
-                    ? t("applicationKeyId")
-                    : provider === "tencent"
-                      ? t("secretId")
-                      : t("accessKeyId")
-                }
-                required
-              >
-                <Input
-                  value={form.accessKeyId}
-                  onChange={(e) => update("accessKeyId", e.target.value)}
-                  autoComplete="off"
-                  required
-                />
-              </Field>
+              {provider !== "webdav" ? (
+                <>
+                  <Field
+                    label={
+                      provider === "backblaze-b2"
+                        ? t("applicationKeyId")
+                        : provider === "tencent"
+                          ? t("secretId")
+                          : t("accessKeyId")
+                    }
+                    required
+                  >
+                    <Input
+                      value={form.accessKeyId}
+                      onChange={(e) => update("accessKeyId", e.target.value)}
+                      autoComplete="off"
+                      required
+                    />
+                  </Field>
+
+                  <Field
+                    label={
+                      provider === "alibaba"
+                        ? t("accessKeySecret")
+                        : provider === "backblaze-b2"
+                          ? t("applicationKey")
+                          : provider === "tencent"
+                            ? t("secretKey")
+                            : t("secretAccessKey")
+                    }
+                    required
+                  >
+                    <Input
+                      type="password"
+                      value={form.secretAccessKey}
+                      onChange={(e) =>
+                        update("secretAccessKey", e.target.value)
+                      }
+                      autoComplete="off"
+                      required
+                    />
+                  </Field>
+                </>
+              ) : null}
 
               <Field
-                label={
-                  provider === "alibaba"
-                    ? t("accessKeySecret")
-                    : provider === "backblaze-b2"
-                      ? t("applicationKey")
-                      : provider === "tencent"
-                        ? t("secretKey")
-                        : t("secretAccessKey")
+                label={t("publicBaseUrl")}
+                hint={
+                  provider === "webdav"
+                    ? t("webdavPublicBaseUrlHint")
+                    : t("publicBaseUrlHint")
                 }
-                required
               >
-                <Input
-                  type="password"
-                  value={form.secretAccessKey}
-                  onChange={(e) => update("secretAccessKey", e.target.value)}
-                  autoComplete="off"
-                  required
-                />
-              </Field>
-
-              <Field label={t("publicBaseUrl")} hint={t("publicBaseUrlHint")}>
                 <Input
                   value={form.publicBaseUrl}
                   onChange={(e) => update("publicBaseUrl", e.target.value)}

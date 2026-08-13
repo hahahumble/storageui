@@ -21,6 +21,11 @@ export type ConnectionProvider =
   | "minio"
   | "tencent"
   | "s3-compatible"
+  | "webdav"
+
+/** WebDAV auth strategy — mirrors the `webdav` client's `AuthType`. */
+export type WebdavAuthType =
+  "auto" | "basic" | "digest" | "none" | "password" | "token"
 
 export type Connection = {
   id: string
@@ -28,15 +33,27 @@ export type Connection = {
   provider: ConnectionProvider
   bucket: string
   region?: string
-  /** Custom endpoint for R2, Alibaba OSS, Backblaze B2, Tencent COS, or S3-compatible services. */
+  /**
+   * Custom endpoint for R2, Alibaba OSS, Backblaze B2, Tencent COS, or
+   * S3-compatible services; the collection base URL for WebDAV.
+   */
   endpoint?: string
   /** Path-style addressing — required by MinIO and some S3-compatible services. */
   forcePathStyle?: boolean
   /** Cloudflare account id (R2). */
   accountId?: string
+  /**
+   * Access key id, or the username for WebDAV basic/digest auth. Blank for
+   * `env` connections on the client — credentials never leave the server.
+   */
   accessKeyId: string
+  /** Secret access key, or the password for WebDAV basic/digest auth. */
   secretAccessKey: string
-  /** Public/CDN origin; when set, `url()` skips signing. */
+  /** WebDAV auth strategy. Defaults to `"password"` when a username is set. */
+  authType?: WebdavAuthType
+  /** WebDAV root directory the virtual keys resolve under. */
+  root?: string
+  /** Public/CDN origin; when set, `url()` skips signing (and WebDAV's proxy). */
   publicBaseUrl?: string
   /** Disallow uploads and every other mutating operation. */
   readOnly?: boolean

@@ -15,6 +15,7 @@ import { minio } from "files-sdk/minio"
 import { r2 } from "files-sdk/r2"
 import { s3 } from "files-sdk/s3"
 import { tencent } from "files-sdk/tencent"
+import { webdav } from "files-sdk/webdav"
 import { zip } from "files-sdk/zip"
 
 import type { Connection } from "@/lib/storage/connections"
@@ -24,6 +25,24 @@ import type { FilesClient } from "@/lib/storage/files-client"
 export function buildFilesForConnectionClient(
   connection: Connection
 ): FilesClient {
+  if (connection.provider === "webdav") {
+    if (!connection.endpoint) {
+      throw new Error("WebDAV requires a base URL.")
+    }
+
+    return createFilesSdk({
+      adapter: webdav({
+        baseUrl: connection.endpoint,
+        username: connection.accessKeyId || undefined,
+        password: connection.secretAccessKey || undefined,
+        authType: connection.authType,
+        root: connection.root || undefined,
+        publicBaseUrl: connection.publicBaseUrl || undefined,
+      }),
+      plugins: [zip()],
+    })
+  }
+
   if (connection.provider === "r2") {
     return createFilesSdk({
       adapter: r2({

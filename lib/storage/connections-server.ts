@@ -7,6 +7,7 @@ import { minio } from "files-sdk/minio"
 import { r2 } from "files-sdk/r2"
 import { s3 } from "files-sdk/s3"
 import { tencent } from "files-sdk/tencent"
+import { webdav } from "files-sdk/webdav"
 import { zip } from "files-sdk/zip"
 
 import type { ConnectionRef } from "@/lib/storage/connection-ref"
@@ -15,6 +16,7 @@ import {
   ENV_CONNECTION_ID_PREFIX,
   type Connection,
   type ConnectionProvider,
+  type WebdavAuthType,
 } from "@/lib/storage/connections"
 import type { FilesClient } from "@/lib/storage/files-client"
 
@@ -31,6 +33,11 @@ type RawEnvSlot = {
   accountId?: string
   accessKeyId?: string
   secretAccessKey?: string
+  /** WebDAV basic/digest credentials (aliases for accessKeyId/secretAccessKey). */
+  username?: string
+  password?: string
+  authType?: string
+  root?: string
   publicBaseUrl?: string
   readOnly?: string
 }
@@ -53,6 +60,10 @@ function numberedEnvSlot(n: number): RawEnvSlot {
     accountId: process.env[`${prefix}ACCOUNT_ID`],
     accessKeyId: process.env[`${prefix}ACCESS_KEY_ID`],
     secretAccessKey: process.env[`${prefix}SECRET_ACCESS_KEY`],
+    username: process.env[`${prefix}USERNAME`],
+    password: process.env[`${prefix}PASSWORD`],
+    authType: process.env[`${prefix}AUTH_TYPE`],
+    root: process.env[`${prefix}ROOT`],
     publicBaseUrl: process.env[`${prefix}PUBLIC_BASE_URL`],
     readOnly: process.env[`${prefix}READ_ONLY`],
   }
@@ -75,6 +86,24 @@ const LEGACY_ENV_SLOT: RawEnvSlot = {
 
 function slotToConnection(raw: RawEnvSlot, id: string): Connection | null {
   const provider = (raw.provider as ConnectionProvider | undefined) ?? "s3"
+
+  if (provider === "webdav") {
+    if (!raw.endpoint) return null
+    return {
+      id,
+      name: raw.name || raw.endpoint,
+      provider,
+      bucket: raw.bucket ?? "",
+      endpoint: raw.endpoint,
+      accessKeyId: raw.username ?? raw.accessKeyId ?? "",
+      secretAccessKey: raw.password ?? raw.secretAccessKey ?? "",
+      authType: (raw.authType as WebdavAuthType | undefined) ?? undefined,
+      root: raw.root || undefined,
+      publicBaseUrl: raw.publicBaseUrl || undefined,
+      readOnly: raw.readOnly === "true",
+      source: "env",
+    }
+  }
 
   if (
     !raw.bucket ||
@@ -142,6 +171,25 @@ export function listPublicEnvConnections(): Connection[] {
 
 function buildFiles(connection: Connection): FilesClient {
   const readonly = connection.readOnly
+
+  if (connection.provider === "webdav") {
+    if (!connection.endpoint) {
+      throw new Error("WebDAV requires a base URL.")
+    }
+
+    return createFilesSdk({
+      adapter: webdav({
+        baseUrl: connection.endpoint,
+        username: connection.accessKeyId || undefined,
+        password: connection.secretAccessKey || undefined,
+        authType: connection.authType,
+        root: connection.root || undefined,
+        publicBaseUrl: connection.publicBaseUrl || undefined,
+      }),
+      readonly,
+      plugins: [zip()],
+    })
+  }
 
   if (connection.provider === "r2") {
     return createFilesSdk({

@@ -30,6 +30,25 @@ import {
 
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? ""
 
+/**
+ * Server-proxied file URL for adapters with no presigned URL primitive
+ * (WebDAV). The ref rides the query string — it carries credentials only for
+ * local connections, and the route is auth-gated by the global proxy.
+ */
+function webdavProxyUrl(
+  ref: ConnectionRef | null,
+  key: string,
+  download = false
+): string {
+  if (!ref) return ""
+  const params = new URLSearchParams({
+    ref: JSON.stringify(ref),
+    key,
+  })
+  if (download) params.set("download", "1")
+  return `${BASE_PATH}/api/file?${params.toString()}`
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error)
@@ -148,6 +167,8 @@ type FileOps = {
   signFileUrl: (key: string) => Promise<string>
   signFileUrls: (keys: string[]) => Promise<Record<string, string>>
   signUploadUrl: (key: string, contentType?: string) => Promise<SignedUpload>
+  /** Direct server/browser upload — used where presigning isn't possible. */
+  uploadFile: (key: string, file: File) => Promise<void>
   createFolder: (path: string) => Promise<void>
   deleteEntry: (item: FileSystemItem) => Promise<void>
   renameEntry: (item: FileSystemItem, name: string) => Promise<void>
@@ -163,6 +184,19 @@ function serverOps(ref: ConnectionRef): FileOps {
     signFileUrls: (keys) => signFileUrlsAction(ref, keys),
     signUploadUrl: (key, contentType) =>
       signUploadUrlAction(ref, key, contentType),
+    uploadFile: async (key, file) => {
+      const body = new FormData()
+      body.append("ref", JSON.stringify(ref))
+      body.append("key", key)
+      body.append("file", file)
+      const response = await fetch(`${BASE_PATH}/api/upload`, {
+        method: "POST",
+        body,
+      })
+      if (!response.ok) {
+        throw new Error((await response.text()) || "Could not upload file.")
+      }
+    },
     createFolder: (path) => createFolderAction(ref, path),
     deleteEntry: (item) => deleteEntryAction(ref, toEntryRef(item)),
     renameEntry: (item, name) => renameEntryAction(ref, toEntryRef(item), name),
@@ -208,6 +242,12 @@ async function makeClientOps(connection: Connection): Promise<FileOps> {
     signUploadUrl: async (key, contentType) => {
       assertWritable()
       return clientFileOps.signUploadUrl(files, key, contentType)
+    },
+    uploadFile: async (key, file) => {
+      assertWritable()
+      await files.upload(key, file, {
+        contentType: file.type || undefined,
+      })
     },
     createFolder: async (path) => {
       assertWritable()
@@ -340,8 +380,15 @@ export function useS3FileSystem(connection: Connection | null): S3FileSystem {
   )
 
   const getFileUrl = React.useCallback(
-    (file: FileSystemFileItem) => urlBatcher.get(file.key ?? file.path),
-    [urlBatcher]
+    (file: FileSystemFileItem): Promise<string> => {
+      // WebDAV can't presign: without a publicBaseUrl the browser has no
+      // authenticated way to fetch the object, so route it through the server.
+      if (connection?.provider === "webdav" && !connection.publicBaseUrl) {
+        return Promise.resolve(webdavProxyUrl(ref, file.key ?? file.path))
+      }
+      return urlBatcher.get(file.key ?? file.path)
+    },
+    [connection, ref, urlBatcher]
   )
 
   const thumbnailHandle = React.useMemo(
@@ -358,13 +405,19 @@ export function useS3FileSystem(connection: Connection | null): S3FileSystem {
       const ops = await opsPromise
       if (!ops) throw new Error("No active connection")
       try {
+        // WebDAV has no presigned upload — stream it through the server (or,
+        // in direct mode, straight from the browser's own client).
+        if (connection?.provider === "webdav") {
+          await ops.uploadFile(key, file)
+          return
+        }
         const signed = await ops.signUploadUrl(key, file.type || undefined)
         await uploadToSignedUrl(signed, file, onProgress)
       } catch (err) {
         throw new Error(errorMessage(err))
       }
     },
-    [opsPromise]
+    [connection, opsPromise]
   )
 
   const createFolder = React.useCallback(
@@ -388,7 +441,10 @@ export function useS3FileSystem(connection: Connection | null): S3FileSystem {
       try {
         if (item.kind === "file") {
           const key = item.key ?? item.path
-          const url = await ops.signFileUrl(key)
+          const url =
+            connection?.provider === "webdav" && !connection.publicBaseUrl
+              ? webdavProxyUrl(ref, key, true)
+              : await ops.signFileUrl(key)
           const name = item.name ?? key.split("/").pop() ?? "download"
           saveDownload(url, name)
           return
@@ -399,7 +455,7 @@ export function useS3FileSystem(connection: Connection | null): S3FileSystem {
         throw new Error(errorMessage(err))
       }
     },
-    [opsPromise]
+    [connection, opsPromise, ref]
   )
 
   const deleteEntry = React.useCallback(
