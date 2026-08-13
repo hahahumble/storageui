@@ -115,9 +115,6 @@ export function FileBrowser() {
     (state) => state.showImagePreviews
   )
   const showHiddenFiles = usePreferencesStore((state) => state.showHiddenFiles)
-  const setShowHiddenFiles = usePreferencesStore(
-    (state) => state.setShowHiddenFiles
-  )
   const section = useNavStore((state) => state.section)
   const recents = useFileMarksStore(
     (state) => state.buckets[bucketKey]?.recents ?? EMPTY_MARKS
@@ -320,7 +317,6 @@ export function FileBrowser() {
             setBucketFilters(bucketKey, filters)
           }
           showHiddenFiles={showHiddenFiles}
-          onShowHiddenFilesChangeAction={setShowHiddenFiles}
           showFileExtensions={showFileExtensions}
           className="min-h-0 flex-1 rounded-none border-0"
           defaultPath={currentPath}

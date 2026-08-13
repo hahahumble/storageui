@@ -129,8 +129,6 @@ import {
   Download01Icon,
   Edit02Icon,
   ExternalLinkIcon,
-  EyeIcon,
-  EyeOffIcon,
   FavouriteIcon,
   File01Icon,
   FilterIcon,
@@ -324,7 +322,6 @@ export function FileSystem({
   showFileExtensions = true,
   defaultShowHiddenFiles = false,
   showHiddenFiles: showHiddenFilesProp,
-  onShowHiddenFilesChangeAction,
   defaultPath = "",
   onPathChangeAction,
   onSelectionChange,
@@ -360,17 +357,9 @@ export function FileSystem({
     () => (loadedItems.length ? [...items, ...loadedItems] : items),
     [items, loadedItems]
   )
-  const [internalShowHiddenFiles, setInternalShowHiddenFiles] = React.useState(
-    defaultShowHiddenFiles
-  )
-  const showHiddenFiles = showHiddenFilesProp ?? internalShowHiddenFiles
-  const setShowHiddenFiles = React.useCallback(
-    (next: boolean) => {
-      if (showHiddenFilesProp === undefined) setInternalShowHiddenFiles(next)
-      onShowHiddenFilesChangeAction?.(next)
-    },
-    [onShowHiddenFilesChangeAction, showHiddenFilesProp]
-  )
+  // Controlled by the caller (the app reads it from Settings) with no in-view
+  // toggle, so there is nothing to hold in local state.
+  const showHiddenFiles = showHiddenFilesProp ?? defaultShowHiddenFiles
   // Paths optimistically hidden while a move is in flight, so a drag-drop (or a
   // dialog move) removes the entries from the source folder instantly instead
   // of waiting seconds for the server move + re-list.
@@ -1968,26 +1957,6 @@ export function FileSystem({
                 onSelectDatePreset={setDatePresetFilter}
                 onToggleFileType={toggleFileTypeFilterValue}
               />
-              <button
-                type="button"
-                aria-label={
-                  showHiddenFiles ? t("hideHiddenFiles") : t("showHiddenFiles")
-                }
-                title={
-                  showHiddenFiles ? t("hideHiddenFiles") : t("showHiddenFiles")
-                }
-                aria-pressed={showHiddenFiles}
-                onClick={() => setShowHiddenFiles(!showHiddenFiles)}
-                className={cn(
-                  TOOLBAR_ICON_BUTTON_CLASSNAME,
-                  showHiddenFiles && "bg-accent text-foreground"
-                )}
-              >
-                <AppIcon
-                  icon={showHiddenFiles ? EyeOffIcon : EyeIcon}
-                  className="size-4"
-                />
-              </button>
               <FileSystemSearchField
                 inputRef={searchInputRef}
                 isExpanded={isSearchExpanded}
