@@ -200,6 +200,7 @@
     "emptyFolder": "This folder is empty",
     "files": "Files",
     "closePreview": "Close preview",
+    "preparingDownload": "Preparing download…",
     "errorDownload": "Could not download item.",
     "errorDelete": "Could not delete item.",
     "errorRename": "Could not rename item.",

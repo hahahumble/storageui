@@ -10,7 +10,11 @@ import { tencent } from "files-sdk/tencent"
 import { webdav } from "files-sdk/webdav"
 import { zip } from "files-sdk/zip"
 
-import type { ConnectionRef } from "@/lib/storage/connection-ref"
+import { readCookie } from "@/lib/auth/core"
+import {
+  PROXY_COOKIE_PREFIX,
+  type ConnectionRef,
+} from "@/lib/storage/connection-ref"
 import {
   ENV_CONNECTION_ID,
   ENV_CONNECTION_ID_PREFIX,
@@ -412,6 +416,21 @@ function resolveConnection(ref: ConnectionRef): Connection {
 
 export function resolveFiles(ref: ConnectionRef): FilesClient {
   return buildFiles(resolveConnection(ref))
+}
+
+/**
+ * The connection a GET route acts on, named by id in the query string. A
+ * `local` one is read from its path-scoped cookie; never from the query — that
+ * is what keeps credentials out of URLs and stops a route from proxying to a
+ * caller-chosen host.
+ */
+export function refFromRequest(request: Request, id: string): ConnectionRef {
+  const cookie = readCookie(
+    request,
+    `${PROXY_COOKIE_PREFIX}${encodeURIComponent(id)}`
+  )
+  if (!cookie) return { source: "env", id }
+  return { source: "local", connection: JSON.parse(cookie) as Connection }
 }
 
 /**

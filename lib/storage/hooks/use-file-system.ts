@@ -34,19 +34,24 @@ import {
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? ""
 
 const PROXY_PATH = `${BASE_PATH}/api/file`
+const ZIP_PATH = `${BASE_PATH}/api/zip`
 
 /**
- * Server-proxied file URL for adapters with no presigned URL primitive
- * (WebDAV).
- *
- * Only the connection id rides the query string. This URL becomes an `<img>`
- * src, a media src and a download link, so it lands in browser history, the
- * download list, `Referer` headers on any outbound navigation and the server's
- * access log — none of which may hold a local connection's password. Those
- * credentials go in a path-scoped session cookie instead: the browser already
- * keeps them in localStorage, so the cookie exposes nothing new, and cookies
- * reach none of the places above.
+ * Hand a `local` connection's credentials to a GET route without putting them
+ * in the URL, which would land in history, the download list, `Referer` and
+ * access logs. Scoped to that one route's path.
  */
+function writeConnectionCookie(connection: Connection, path: string) {
+  if (connection.source !== "local") return
+
+  const secure = window.location.protocol === "https:" ? "; Secure" : ""
+  document.cookie =
+    `${PROXY_COOKIE_PREFIX}${encodeURIComponent(connection.id)}=` +
+    `${encodeURIComponent(JSON.stringify(connection))}` +
+    `; Path=${path}; SameSite=Strict${secure}`
+}
+
+/** Server-proxied file URL for adapters with no presigned URL primitive. */
 function webdavProxyUrl(
   connection: Connection | null,
   key: string,
@@ -54,13 +59,7 @@ function webdavProxyUrl(
 ): string {
   if (!connection) return ""
 
-  if (connection.source === "local") {
-    const secure = window.location.protocol === "https:" ? "; Secure" : ""
-    document.cookie =
-      `${PROXY_COOKIE_PREFIX}${encodeURIComponent(connection.id)}=` +
-      `${encodeURIComponent(JSON.stringify(connection))}` +
-      `; Path=${PROXY_PATH}; SameSite=Strict${secure}`
-  }
+  writeConnectionCookie(connection, PROXY_PATH)
 
   const params = new URLSearchParams({ c: connection.id, key })
   if (download) params.set("download", "1")
@@ -267,20 +266,18 @@ function serverOps(ref: ConnectionRef): FileOps {
     renameEntry: (item, name) => renameEntryAction(ref, toEntryRef(item), name),
     moveEntry: (item, destinationFolder) =>
       moveEntryAction(ref, toEntryRef(item), destinationFolder),
+    // A plain download, not a fetch: fetching buffers the whole archive in
+    // memory and shows the user nothing until the last byte arrives.
     downloadFolder: async (item) => {
-      const response = await fetch(`${BASE_PATH}/api/zip`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ref, path: item.path }),
-      })
-      if (!response.ok) {
-        throw new Error((await response.text()) || "Could not download folder.")
+      const connectionId = ref.source === "env" ? ref.id : ref.connection.id
+      if (ref.source === "local") {
+        writeConnectionCookie(ref.connection, ZIP_PATH)
       }
 
-      const blob = await response.blob()
       const folderName =
         item.name ?? item.path.replace(/\/$/, "").split("/").pop() ?? "folder"
-      saveDownload(URL.createObjectURL(blob), `${folderName}.zip`, true)
+      const params = new URLSearchParams({ c: connectionId, path: item.path })
+      saveDownload(`${ZIP_PATH}?${params.toString()}`, `${folderName}.zip`)
     },
   }
 }

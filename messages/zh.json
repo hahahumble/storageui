@@ -200,6 +200,7 @@
     "emptyFolder": "此文件夹为空",
     "files": "文件",
     "closePreview": "关闭预览",
+    "preparingDownload": "正在准备下载…",
     "errorDownload": "无法下载该项目。",
     "errorDelete": "无法删除该项目。",
     "errorRename": "无法重命名该项目。",

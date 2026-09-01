@@ -1327,9 +1327,25 @@ export function FileSystem({
         return
       }
 
-      void Promise.resolve(onDownloadEntry(entry)).catch((error) => {
-        toast.error(error instanceof Error ? error.message : t("errorDownload"))
-      })
+      const download = Promise.resolve(onDownloadEntry(entry))
+
+      // Native downloads resolve at once; only browser-side zipping is slow
+      // enough to reach the delay, so only that path gets a toast.
+      let pending: string | number | undefined
+      const showPending = setTimeout(() => {
+        pending = toast.loading(t("preparingDownload"))
+      }, 400)
+
+      void download
+        .catch((error) => {
+          toast.error(
+            error instanceof Error ? error.message : t("errorDownload")
+          )
+        })
+        .finally(() => {
+          clearTimeout(showPending)
+          if (pending !== undefined) toast.dismiss(pending)
+        })
     },
     [downloadFile, onDownloadEntry, t]
   )

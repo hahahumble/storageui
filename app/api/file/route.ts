@@ -1,10 +1,5 @@
-import { readCookie } from "@/lib/auth/core"
-import {
-  PROXY_COOKIE_PREFIX,
-  type ConnectionRef,
-} from "@/lib/storage/connection-ref"
-import type { Connection } from "@/lib/storage/connections"
-import { resolveFiles } from "@/lib/storage/connections-server"
+import type { ConnectionRef } from "@/lib/storage/connection-ref"
+import { refFromRequest, resolveFiles } from "@/lib/storage/connections-server"
 import { normalizeError } from "@/lib/storage/file-operations"
 
 export const dynamic = "force-dynamic"
@@ -31,7 +26,7 @@ export async function GET(request: Request) {
 
   let ref: ConnectionRef
   try {
-    ref = refFor(request, connectionId)
+    ref = refFromRequest(request, connectionId)
   } catch {
     return new Response("Invalid request.", { status: 400 })
   }
@@ -99,21 +94,6 @@ export async function GET(request: Request) {
     const isMissing = /\(NotFound\)/.test(err.message)
     return new Response(err.message, { status: isMissing ? 404 : 502 })
   }
-}
-
-/**
- * A `local` connection is read from its cookie; anything else is treated as an
- * env id, which `resolveFiles` rejects when it doesn't exist. A connection is
- * never accepted from the query string — that is what keeps credentials out of
- * the URL, and it stops the route from proxying to a caller-chosen host.
- */
-function refFor(request: Request, id: string): ConnectionRef {
-  const cookie = readCookie(
-    request,
-    `${PROXY_COOKIE_PREFIX}${encodeURIComponent(id)}`
-  )
-  if (!cookie) return { source: "env", id }
-  return { source: "local", connection: JSON.parse(cookie) as Connection }
 }
 
 /** Parse a single `bytes=start-end` range; `end` is inclusive. */
