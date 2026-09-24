@@ -10,6 +10,7 @@ import {
   searchPanelOpen,
 } from "@codemirror/search"
 import { EditorState, type Extension } from "@codemirror/state"
+import { layer, RectangleMarker } from "@codemirror/view"
 import { githubDark, githubLight } from "@uiw/codemirror-theme-github"
 import { basicSetup, EditorView } from "codemirror"
 import { useLocale, useTranslations } from "next-intl"
@@ -179,6 +180,10 @@ const layoutTheme = EditorView.theme({
     backgroundColor: "var(--color-accent)",
     color: "var(--color-foreground)",
   },
+  // Painted by `activeLineLayer` instead, so the tint sits under the selection.
+  "& .cm-line.cm-activeLine": {
+    backgroundColor: "transparent",
+  },
   ".cm-searchMatch": {
     backgroundColor:
       "color-mix(in srgb, var(--color-warning) 28%, transparent)",
@@ -190,6 +195,52 @@ const layoutTheme = EditorView.theme({
     outline: "1px solid color-mix(in srgb, var(--color-info) 58%, transparent)",
   },
 })
+
+// Layers stack by registration order, so this must come after `basicSetup`'s
+// selection layer to be drawn beneath it.
+const activeLineLayer = [
+  layer({
+    above: false,
+    class: "cm-activeLineLayer",
+    markers(view) {
+      const scroller = view.scrollDOM.getBoundingClientRect()
+      const content = view.contentDOM.getBoundingClientRect()
+      const left =
+        (content.left - scroller.left) / view.scaleX + view.scrollDOM.scrollLeft
+      const top =
+        (view.documentTop - scroller.top) / view.scaleY +
+        view.scrollDOM.scrollTop
+      const width = view.contentDOM.clientWidth
+
+      const seen = new Set<number>()
+      const markers: RectangleMarker[] = []
+      for (const range of view.state.selection.ranges) {
+        const line = view.lineBlockAt(range.head)
+        if (seen.has(line.from)) continue
+        seen.add(line.from)
+        markers.push(
+          new RectangleMarker(
+            "cm-activeLineBackground",
+            left,
+            top + line.top,
+            width,
+            line.height
+          )
+        )
+      }
+      return markers
+    },
+    update: (update) =>
+      update.selectionSet ||
+      update.docChanged ||
+      update.viewportChanged ||
+      update.geometryChanged,
+  }),
+  EditorView.baseTheme({
+    "&light .cm-activeLineBackground": { backgroundColor: "#cceeff44" },
+    "&dark .cm-activeLineBackground": { backgroundColor: "#36334280" },
+  }),
+]
 
 async function languageExtension(fileName: string): Promise<Extension[]> {
   const description = LanguageDescription.matchFilename(languages, fileName)
@@ -290,6 +341,7 @@ export const CodeViewer = React.forwardRef<
               : []),
             isDark ? githubDark : githubLight,
             layoutTheme,
+            activeLineLayer,
             EditorState.readOnly.of(true),
             EditorView.lineWrapping,
             ...langExt,
