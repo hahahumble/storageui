@@ -444,6 +444,22 @@ export function FileBrowser() {
             ? () => toggleStar(bucketKey, toMarkedFile(opened.file))
             : undefined
         }
+        onSaveAction={
+          isReadOnly
+            ? undefined
+            : async (file, text, contentType) => {
+                const key = file.key ?? file.path
+                const name = file.name ?? key.split("/").pop() ?? key
+                await uploadFile(
+                  key,
+                  new File([text], name, {
+                    type: contentType ?? file.contentType ?? "",
+                  })
+                )
+                refresh()
+                setRefreshNonce((nonce) => nonce + 1)
+              }
+        }
       />
 
       <input

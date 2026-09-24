@@ -9,12 +9,18 @@ import {
   search,
   searchPanelOpen,
 } from "@codemirror/search"
-import { EditorState, type Extension } from "@codemirror/state"
-import { layer, RectangleMarker } from "@codemirror/view"
+import {
+  Compartment,
+  EditorState,
+  type Extension,
+  type Text,
+} from "@codemirror/state"
+import { keymap, layer, RectangleMarker } from "@codemirror/view"
 import { githubDark, githubLight } from "@uiw/codemirror-theme-github"
 import { basicSetup, EditorView } from "codemirror"
 import { useLocale, useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
+import { toast } from "sonner"
 
 import { Spinner } from "@/components/ui/spinner"
 
@@ -253,17 +259,34 @@ async function languageExtension(fileName: string): Promise<Extension[]> {
   }
 }
 
+const themeCompartment = new Compartment()
+const phrasesCompartment = new Compartment()
+const readOnlyCompartment = new Compartment()
+const languageCompartment = new Compartment()
+
 export type CodeViewerHandle = {
   toggleSearch: () => void
+  /** Resolves to whether the editor is clean afterwards. */
+  save: () => Promise<boolean>
+  /** Replace the edits with the last saved contents. */
+  revert: () => void
 }
+
+export type CodeViewerStatus = { dirty: boolean; saving: boolean }
 
 export const CodeViewer = React.forwardRef<
   CodeViewerHandle,
   {
     url: string
     fileName: string
+    editable?: boolean
+    onSaveAction?: (text: string, contentType: string | null) => Promise<void>
+    onStatusChangeAction?: (status: CodeViewerStatus) => void
   }
->(function CodeViewer({ url, fileName }, ref) {
+>(function CodeViewer(
+  { url, fileName, editable = false, onSaveAction, onStatusChangeAction },
+  ref
+) {
   const t = useTranslations("Viewer")
   const locale = useLocale()
   const { resolvedTheme } = useTheme()
@@ -271,20 +294,80 @@ export const CodeViewer = React.forwardRef<
 
   const [text, setText] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
+  const [view, setView] = React.useState<EditorView | null>(null)
+  const [dirty, setDirty] = React.useState(false)
+  const [saving, setSaving] = React.useState(false)
 
   const hostRef = React.useRef<HTMLDivElement>(null)
-  const viewRef = React.useRef<EditorView | null>(null)
+  // Written back on save so the object keeps the type it was stored with.
+  const contentTypeRef = React.useRef<string | null>(null)
+  const savedDocRef = React.useRef<Text | null>(null)
+  const savingRef = React.useRef(false)
+  const onSaveRef = React.useRef(onSaveAction)
+  const onStatusChangeRef = React.useRef(onStatusChangeAction)
+
+  const save = React.useCallback(
+    async (target: EditorView): Promise<boolean> => {
+      const onSave = onSaveRef.current
+      const doc = target.state.doc
+      if (!onSave || savingRef.current || !savedDocRef.current) return false
+      if (doc.eq(savedDocRef.current)) return true
+
+      savingRef.current = true
+      setSaving(true)
+      try {
+        await onSave(doc.toString(), contentTypeRef.current)
+        savedDocRef.current = doc
+        // Typing can continue while the upload is in flight.
+        const clean = target.state.doc.eq(doc)
+        setDirty(!clean)
+        toast.success(t("saved"))
+        return clean
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("saveFailed"))
+        return false
+      } finally {
+        savingRef.current = false
+        setSaving(false)
+      }
+    },
+    [t]
+  )
+  const saveRef = React.useRef(save)
+
+  React.useEffect(() => {
+    onSaveRef.current = onSaveAction
+    onStatusChangeRef.current = onStatusChangeAction
+    saveRef.current = save
+  })
 
   React.useImperativeHandle(ref, () => ({
     toggleSearch: () => {
-      const view = viewRef.current
-
       if (!view) return
 
       if (searchPanelOpen(view.state)) closeSearchPanel(view)
       else openSearchPanel(view)
     },
+    save: async () => (view ? save(view) : false),
+    revert: () => {
+      const saved = savedDocRef.current
+      if (!view || !saved) return
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: saved },
+      })
+    },
   }))
+
+  React.useEffect(() => {
+    onStatusChangeRef.current?.({ dirty, saving })
+  }, [dirty, saving])
+
+  React.useEffect(() => {
+    if (!dirty) return
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [dirty])
 
   // Fetch the file's contents once per url.
   React.useEffect(() => {
@@ -295,7 +378,12 @@ export const CodeViewer = React.forwardRef<
     const controller = new AbortController()
     void (async () => {
       try {
-        const response = await fetch(url, { signal: controller.signal })
+        // `no-store`: a stable URL (the WebDAV proxy) would otherwise serve
+        // the pre-save contents from the HTTP cache on reopen.
+        const response = await fetch(url, {
+          signal: controller.signal,
+          cache: "no-store",
+        })
         if (!response.ok) {
           throw new Error(`${response.status} ${response.statusText}`)
         }
@@ -304,7 +392,9 @@ export const CodeViewer = React.forwardRef<
           throw new Error(t("codeTooLarge"))
         }
         const body = await response.text()
-        if (!cancelled) setText(body)
+        if (cancelled) return
+        contentTypeRef.current = response.headers.get("content-type")
+        setText(body)
       } catch (err) {
         if (cancelled || controller.signal.aborted) return
         setError(err instanceof Error ? err.message : t("codeLoadFailed"))
@@ -317,45 +407,89 @@ export const CodeViewer = React.forwardRef<
     }
   }, [url, t])
 
-  // (Re)build the editor when the text or theme changes.
-  React.useEffect(() => {
-    if (text === null || !hostRef.current) return
-
-    let cancelled = false
+  // Built once per loaded text. Theme, locale, read-only and language are
+  // swapped through compartments below, so toggling them keeps the edits.
+  React.useLayoutEffect(() => {
     const host = hostRef.current
+    if (text === null || !host) return
 
-    void (async () => {
-      const langExt = await languageExtension(fileName)
-      if (cancelled) return
-
-      viewRef.current?.destroy()
-      viewRef.current = new EditorView({
-        parent: host,
-        state: EditorState.create({
-          doc: text,
-          extensions: [
-            basicSetup,
-            search({ top: true }),
-            ...(CODEMIRROR_PHRASES[locale]
-              ? [EditorState.phrases.of(CODEMIRROR_PHRASES[locale])]
-              : []),
-            isDark ? githubDark : githubLight,
-            layoutTheme,
-            activeLineLayer,
-            EditorState.readOnly.of(true),
-            EditorView.lineWrapping,
-            ...langExt,
-          ],
-        }),
-      })
-    })()
+    const next = new EditorView({
+      parent: host,
+      state: EditorState.create({
+        doc: text,
+        extensions: [
+          basicSetup,
+          search({ top: true }),
+          phrasesCompartment.of([]),
+          themeCompartment.of([]),
+          layoutTheme,
+          activeLineLayer,
+          readOnlyCompartment.of(EditorState.readOnly.of(true)),
+          EditorView.lineWrapping,
+          languageCompartment.of([]),
+          keymap.of([
+            {
+              key: "Mod-s",
+              preventDefault: true,
+              run: (target) => {
+                void saveRef.current(target)
+                return true
+              },
+            },
+          ]),
+          EditorView.updateListener.of((update) => {
+            if (!update.docChanged || !savedDocRef.current) return
+            setDirty(!update.state.doc.eq(savedDocRef.current))
+          }),
+        ],
+      }),
+    })
+    savedDocRef.current = next.state.doc
+    setDirty(false)
+    setView(next)
 
     return () => {
-      cancelled = true
-      viewRef.current?.destroy()
-      viewRef.current = null
+      next.destroy()
+      setView(null)
     }
-  }, [text, isDark, fileName, locale])
+  }, [text])
+
+  React.useLayoutEffect(() => {
+    view?.dispatch({
+      effects: themeCompartment.reconfigure(isDark ? githubDark : githubLight),
+    })
+  }, [view, isDark])
+
+  React.useLayoutEffect(() => {
+    const phrases = CODEMIRROR_PHRASES[locale]
+    view?.dispatch({
+      effects: phrasesCompartment.reconfigure(
+        phrases ? EditorState.phrases.of(phrases) : []
+      ),
+    })
+  }, [view, locale])
+
+  React.useLayoutEffect(() => {
+    if (!view) return
+    view.dispatch({
+      effects: readOnlyCompartment.reconfigure(
+        EditorState.readOnly.of(!editable)
+      ),
+    })
+    if (editable) view.focus()
+  }, [view, editable])
+
+  React.useEffect(() => {
+    if (!view) return
+    let cancelled = false
+    void languageExtension(fileName).then((extension) => {
+      if (cancelled) return
+      view.dispatch({ effects: languageCompartment.reconfigure(extension) })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [view, fileName])
 
   return (
     <div className="relative h-full min-h-0">
